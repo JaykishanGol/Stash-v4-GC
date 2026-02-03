@@ -1,0 +1,74 @@
+# Deep Dive: Mobile Experience (Tier 3.1)
+
+You asked for details on improving the mobile feel of Stash. Since this is a Personal Knowledge Management tool, the mobile experience should feel "native" and fluid, not like a shrunken website.
+
+## 1. Swipe Gestures (The "Gmail Feel")
+Currently, to delete an item on mobile, you likely have to tap it to open, then tap a menu, then tap delete. This is slow.
+
+**The Goal:**
+*   **Swipe Left:** Archive or Delete (Red background with trash icon).
+*   **Swipe Right:** Toggle "Complete" or "Pin" (Green/Blue background).
+
+**How to Implement:**
+We can use a library like `react-swipeable` or `framer-motion`.
+*   We wrap the `ItemCard` component in a `<Swipeable>` container.
+*   The container detects horizontal movement.
+*   As you drag, we reveal a colored background layer underneath the card.
+*   If dragged past 30%, we trigger the action (e.g., `moveItemsToTrash(id)`).
+
+## 2. Touch Targets (The "Fat Finger" Rule)
+Apple and Google guidelines state that any clickable element must be at least **44x44 pixels**.
+
+**The Problem:**
+Your current `QuickActions` buttons (the small icons on cards) might be 24px or 32px. This makes them hard to tap accurately on a phone, leading to frustration.
+
+**The Fix:**
+*   **Don't make the icon bigger**, make the *clickable area* bigger.
+*   **CSS:** Add transparent padding.
+    ```css
+    .action-btn {
+        width: 44px;
+        height: 44px;
+        padding: 10px; /* Icon stays small, hit area grows */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    ```
+
+## 3. Pull-to-Refresh
+On mobile, users expect to pull down from the top of the list to refresh data.
+
+**The Goal:**
+*   When at the top of the item list, dragging down triggers `loadUserData()` and `persistentSyncQueue.process()`.
+*   Shows a spinning loader icon while fetching.
+
+**How to Implement:**
+*   This is tricky with custom scrolling containers.
+*   We would check `scrollTop === 0` and touch events.
+*   If `touchMove` Y-distance > 100px, trigger refresh.
+
+## 4. Mobile Navigation (Bottom Bar vs. Sidebar)
+**Current:** You have a Sidebar toggle (Hamburger menu).
+**Issue:** On large phones, reaching the top-left menu button is hard with one hand.
+
+**The Fix (Optional but Recommended):**
+*   **Hide Sidebar on Mobile.**
+*   **Add Bottom Navigation Bar:** A fixed bar at the bottom with 4-5 core tabs:
+    *   Home (Today)
+    *   Tasks
+    *   Search (⌘K replacement)
+    *   Quick Add (+)
+    *   Menu (Opens the full sidebar for less used items)
+
+## 5. Keyboard Handling (The "Virtual Keyboard" Issue)
+**The Problem:** When you tap a text input on mobile, the virtual keyboard pops up and shrinks the viewport height. This often hides the "Save" button or breaks layout (sticky headers might jump).
+
+**The Fix:**
+*   Use `interactive-widget=resizes-content` in the viewport meta tag.
+*   Ensure modals (like QuickAdd) have `overflow-y: auto` so you can scroll to the button even when the keyboard is up.
+
+---
+
+### Recommended First Step
+I suggest implementing **Swipe Gestures** first. It makes managing lists on a phone significantly faster and more satisfying.

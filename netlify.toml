@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Scheduled function for checking reminders
+[functions.check-reminders]
+  schedule = "* * * * *"
+
+# SPA fallback redirect
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

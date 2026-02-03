@@ -1,0 +1,23 @@
+import type { StateCreator } from 'zustand';
+
+export interface AuthSlice {
+  user: { id: string; email: string } | null;
+  isAuthModalOpen: boolean;
+  isLoading: boolean;
+  
+  setUser: (user: { id: string; email: string } | null) => void;
+  openAuthModal: () => void;
+  closeAuthModal: () => void;
+  setLoading: (loading: boolean) => void;
+}
+
+export const createAuthSlice: StateCreator<AuthSlice> = (set) => ({
+  user: null,
+  isAuthModalOpen: false,
+  isLoading: false,
+  
+  setUser: (user) => set({ user }),
+  openAuthModal: () => set({ isAuthModalOpen: true }),
+  closeAuthModal: () => set({ isAuthModalOpen: false }),
+  setLoading: (loading) => set({ isLoading: loading }),
+});

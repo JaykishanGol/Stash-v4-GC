@@ -1,0 +1,46 @@
+# Mobile "Add Note" Experience - Improvement Options
+
+You are right that the current modal is cluttered. On a phone, screen real estate is precious. Here are 3 distinct approaches we can take.
+
+## Option A: The "Expanded Sheet" (Recommended)
+This is how modern iOS/Android apps (like Apple Notes or Google Keep) handle it.
+*   **Behavior:** When you open "Add Note", it doesn't open a small popup box. It slides up a **full-screen sheet**.
+*   **Keyboard Open:** When you tap to type, the "Type Selector" (Note/Image/Link icons) and "Color/Priority" options **disappear completely**.
+*   **Result:** You get the *entire* screen for typing.
+*   **Accessing Options:** If you need to change color, you tap a small "Settings" icon, and the options slide back up.
+*   **Pros:** Maximum typing space. Cleanest look.
+*   **Cons:** One extra tap to change color/priority (but usually you don't do that every time).
+
+## Option B: The "Sticky Toolbar" (Chat App Style)
+This works like WhatsApp or Telegram.
+*   **Behavior:** The input field stays at the bottom, just above the keyboard.
+*   **Keyboard Open:** The modal shrinks, but the "Save" button and a few key icons (Camera, Checklist) stay attached to the top of the keyboard.
+*   **Pros:** Familiar to anyone who texts. Fast access to media uploads.
+*   **Cons:** Harder to implement perfectly across all mobile browsers (Safari/Chrome handle keyboards differently).
+
+## Option C: The "Two-Step" Wizard
+*   **Step 1:** You only see a big text box. "What's on your mind?".
+*   **Step 2:** After typing, you hit "Next".
+*   **Step 3:** *Then* you pick Color, Priority, Folder, etc.
+*   **Pros:** Very focused typing.
+*   **Cons:** Slower. Feels like filling out a form, not jotting a quick note.
+
+---
+
+## 🔗 Share Target (Why it fails)
+The "Share to Stash" feature on Android/iOS uses the Web Share Target API.
+*   **Current State:** Your app expects a `GET` request (URL parameters), but the Manifest is likely configured for `POST` (Form Data), or vice-versa.
+*   **The Fix:** I will switch the Manifest to use `method: "GET"`.
+    *   When you share text from Chrome/Twitter, it will open `https://your-app.com/?share_target=true&title=...&text=...`.
+    *   `App.tsx` is already built to read these parameters! This is the easiest and most reliable fix.
+
+---
+
+### My Recommendation
+I strongly recommend **Option A (Expanded Sheet)** for the UI, and the **GET Method** fix for sharing.
+
+1.  **CSS Change:** Make the modal full-height on mobile.
+2.  **Logic Change:** Hide the `options-panel` and `mobile-type-selector` when the user is typing (focused on textarea).
+3.  **Manifest Change:** Update `vite.config.ts` to use GET for sharing.
+
+Do you want to proceed with this plan?

@@ -1,0 +1,94 @@
+# Stash V4 - Refactoring & Improvement Plan
+
+## Executive Summary
+The Stash V4 codebase is functional but fragile. It relies on a monolithic state store (`useAppStore.ts`) that has exceeded 1500 lines, causing reactivity issues in the UI (specifically `MainCanvas.tsx`). The data synchronization layer contains risky "self-healing" logic that can silently corrupt data. Furthermore, the notification system is split between client-side polling and server-side push, risking duplicate alerts.
+
+This plan outlines a 3-Phase approach to stabilize, architect, and polish the application.
+
+---
+
+## Phase 1: Core Stability (High Priority)
+*Goal: Fix broken UI reactivity and ensure data integrity.*
+
+### 1.1. Refactor "God Store" (`useAppStore.ts`)
+**Problem:** The store handles Auth, UI, Data, Sync, and Logic in one file. This breaks Zustand's ability to optimize re-renders.
+**Action:** Split the store into independent slices using the "Slice Pattern".
+*   `createAuthSlice`: User session, loading state.
+*   `createUISlice`: Sidebar toggle, Modals, Active View, Theme.
+*   `createDataSlice`: Items, Tasks, Lists, Folders (CRUD operations).
+*   `createSyncSlice`: Persistent Queue integration.
+**Implementation:**
+1.  Create `src/store/slices/` directory.
+2.  Migrate logic piece-by-piece.
+3.  Re-compose them in `useAppStore.ts`.
+
+### 1.2. Fix Reactivity in `MainCanvas.tsx`
+**Problem:** The component uses manual `useEffect` subscriptions and local `useState` to bypass Zustand, explicitly stating "reactivity is broken".
+**Action:**
+1.  Once the store is sliced, remove `localListId` and the manual subscription `useEffect`.
+2.  Use `useShallow` from `zustand/react/shallow` for selecting multiple state values.
+3.  Ensure `getFilteredItems` is a memoized selector (using `reselect` or `useMemo` inside the component), not a store action that returns a new array every time.
+
+### 1.3. Harden Data Sync (`persistentQueue.ts`)
+**Problem:** The "Self-Healing" logic (Lines 97-111) deletes payload fields if an "unknown column" error occurs.
+**Action:**
+1.  **Remove** the column-deletion logic immediately.
+2.  If a schema mismatch occurs, the sync should **Fail and Alert** (or move to a "Dead Letter Queue"), not corrupt the data.
+3.  Implement a specific error UI toast: "Sync failed: Client is outdated. Please refresh."
+
+---
+
+## Phase 2: Architecture & Clean Code
+*Goal: Remove technical debt and improve maintainability.*
+
+### 2.1. Unify Types
+**Problem:** `src/lib/supabase.ts` manually defines `TaskDbData` instead of using the `Task` type from `src/lib/types.ts`.
+**Action:**
+1.  Delete `TaskDbData` in `supabase.ts`.
+2.  Import `Task` from `types.ts`.
+3.  Ensure `types.ts` is the Single Source of Truth.
+
+### 2.2. Consolidate Notifications
+**Problem:** Client polls every 30s (`MainCanvas`); Server checks every 1m (`check-reminders`). Double notifications occur.
+**Action:**
+1.  **Primary Strategy:** Rely on Server-Side Push (WebPush) for reliability (works when app is closed).
+2.  **Client-Side Enhancement:**
+    *   The client poller should ONLY show a visual "In-App Toast/Banner".
+    *   When the client shows this toast, it should immediately fire an "Acknowledge" RPC to the server.
+    *   The server script must check `last_acknowledged_at` before sending a Push.
+    *   *Result:* If user is online, they see the toast, the server sees the Ack, and no Push is sent. If user is offline/away, Push is sent.
+
+### 2.3. Implement Proper Routing
+**Problem:** `MainCanvas` manually swaps components based on `activeView` string. Back button breaks.
+**Action:**
+1.  Install `wouter` (lightweight) or `react-router-dom`.
+2.  Map views to routes:
+    *   `/` -> Dashboard
+    *   `/tasks` -> TasksView
+    *   `/calendar` -> CalendarLayout
+    *   `/folder/:id` -> Folder View
+3.  Replace `setActiveView` with `navigate()`.
+
+---
+
+## Phase 3: Polish & Performance
+*Goal: visual consistency and speed.*
+
+### 3.1. CSS Refactoring
+**Problem:** `agenda.css` uses magic numbers (`top: 180px`, `left: 128px`) and global selectors.
+**Action:**
+1.  Convert `scheduler-agenda-container` and children to CSS Modules (`SchedulerView.module.css`).
+2.  Use Flexbox/Grid for layout instead of absolute positioning to support dynamic sidebar widths.
+
+### 3.2. Reduce Bundle Size
+**Problem:** `MainCanvas` imports everything (`TasksView`, `CalendarLayout`, `TaskDetailView`).
+**Action:**
+1.  Use `React.lazy` and `Suspense` for heavy views (`CalendarLayout`, `RichTextEditor`).
+
+---
+
+## Immediate Next Steps (Instructions for Developer)
+
+1.  **Approve Phase 1:** Acknowledge this plan.
+2.  **Execute 1.3 (Sync Safety):** This is a quick fix to prevent data loss. Open `persistentQueue.ts` and remove the `isMissingColumn` block.
+3.  **Execute 1.1 (Slice Store):** Create the `slices` folder and begin migrating `Auth` and `UI` logic first.
