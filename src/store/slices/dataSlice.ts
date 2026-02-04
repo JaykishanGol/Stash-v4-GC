@@ -1063,7 +1063,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
             // Refresh to see new server-generated items
             if (isSupabaseConfigured()) {
-                 setTimeout(() => get().loadUserData(), 1000); 
+                 setTimeout(() => (get() as any).loadUserData(), 1000); 
             }
             
             (set as any)({ clipboard: { items: [], operation: null } });

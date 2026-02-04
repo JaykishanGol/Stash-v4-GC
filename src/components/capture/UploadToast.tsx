@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, Upload, X, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, X, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { UploadItem } from '../../lib/types';
 
@@ -21,10 +21,8 @@ export function UploadToast() {
     if (uploads.length === 0) return null;
 
     const activeUploads = uploads.filter(u => u.status === 'uploading');
-    const failedUploads = uploads.filter(u => u.status === 'error');
     const successUploads = uploads.filter(u => u.status === 'success');
 
-    const totalCount = uploads.length;
     const activeCount = activeUploads.length;
     
     // Calculate global progress

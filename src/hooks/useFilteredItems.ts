@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { FOLDERS_ROOT_ID, type Item, type Task } from '../lib/types';
+import { FOLDERS_ROOT_ID } from '../lib/types';
 
 /**
  * High-Performance Memoized Filter Hook

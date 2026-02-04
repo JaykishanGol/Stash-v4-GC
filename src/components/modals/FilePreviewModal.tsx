@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, File, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Code, Upload, RotateCcw } from 'lucide-react';
+import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, File, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Code, RotateCcw } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { supabase, STORAGE_BUCKET, uploadFile } from '../../lib/supabase';
 import { generateId } from '../../lib/utils';

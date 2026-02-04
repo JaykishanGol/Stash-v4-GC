@@ -143,7 +143,7 @@ export interface UISlice {
     markAllNotificationsRead: () => Promise<void>;
 }
 
-export const createUISlice: StateCreator<UISlice> = (set) => ({
+export const createUISlice: StateCreator<UISlice> = (set, get) => ({
     isSidebarOpen: true,
     viewMode: 'grid',
     activeView: 'home',
