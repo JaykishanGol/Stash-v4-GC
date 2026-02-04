@@ -13,6 +13,7 @@ import type {
 } from '../../lib/types';
 import { persistentSyncQueue } from '../../lib/persistentQueue';
 import { googleSyncQueue } from '../../lib/googleSyncQueue';
+import { tombstoneManager } from '../../lib/tombstones';
 import { 
     undoStack, 
     createDeleteItemsAction, 
@@ -339,56 +340,132 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
             return {
                 items: remainingItems,
-                trashedItems: [...state.trashedItems, ...trashedWithTimestamp],
+                trashedItems: [
+                    ...state.trashedItems.filter(i => !allIdsToDelete.includes(i.id)),
+                    ...trashedWithTimestamp
+                ],
             };
+        });
+
+        get().calculateStats();
+        get().refreshFolderCounts();
+        
+        // Notify with Undo
+        (get() as any).addNotification(
+            'success', 
+            `Moved ${itemsToTrash.length} item${itemsToTrash.length !== 1 ? 's' : ''} to trash`, 
+            'Undo',
+            () => get().undo()
+        );
+    },
+
+    restoreItem: (id) => {
+        const state = get();
+        const itemToRestore = state.trashedItems.find(i => i.id === id);
+        if (!itemToRestore) return;
+
+        // Helper to collect all descendants in trash
+        const getTrashedDescendants = (folderId: string): string[] => {
+            const children = state.trashedItems.filter(i => i.folder_id === folderId);
+            let descendants: string[] = [];
+            children.forEach(child => {
+                descendants.push(child.id);
+                if (child.type === 'folder') {
+                    descendants = [...descendants, ...getTrashedDescendants(child.id)];
+                }
+            });
+            return descendants;
+        };
+
+        let idsToRestore = [id];
+        if (itemToRestore.type === 'folder') {
+            idsToRestore = [...idsToRestore, ...getTrashedDescendants(id)];
+        }
+
+        const now = new Date().toISOString();
+        
+        set(state => {
+            const itemsRestoring = state.trashedItems.filter(i => idsToRestore.includes(i.id));
+            const restoredItems = itemsRestoring.map(i => ({
+                 ...i, 
+                 deleted_at: null, 
+                 updated_at: now 
+            }));
+
+            return {
+                trashedItems: state.trashedItems.filter(i => !idsToRestore.includes(i.id)),
+                items: [...state.items, ...restoredItems]
+            };
+        });
+
+        // Sync all restored items
+        idsToRestore.forEach(itemId => {
+            const item = get().items.find(i => i.id === itemId);
+            if (item) get().syncItemToDb(item);
         });
 
         get().calculateStats();
         get().refreshFolderCounts();
     },
 
-    restoreItem: (id) => {
-        const itemToRestore = get().trashedItems.find(i => i.id === id);
-        if (!itemToRestore) return;
-
-        const now = new Date().toISOString();
-        const restoredItem = { ...itemToRestore, deleted_at: null, updated_at: now };
-
-        set(state => ({
-            trashedItems: state.trashedItems.filter(i => i.id !== id),
-            items: [...state.items, restoredItem]
-        }));
-
-        get().syncItemToDb(restoredItem);
-        get().calculateStats();
-        get().refreshFolderCounts();
-    },
-
     permanentlyDeleteItem: async (id) => {
-        const item = get().trashedItems.find(i => i.id === id);
+        const state = get();
+        const item = state.trashedItems.find(i => i.id === id);
 
-        // Clean up storage file if it's an image or file type
-        if (item && item.file_meta?.path) {
-            try {
-                const { deleteFile } = await import('../../lib/supabase');
-                await deleteFile(item.file_meta.path);
-                console.log('[DataSlice] Cleaned up storage file:', item.file_meta.path);
-            } catch (err) {
-                console.warn('[DataSlice] Failed to delete storage file:', err);
-                // Continue with DB deletion even if storage cleanup fails
+        // Helper to collect all descendants (same as moveItemsToTrash)
+        const getDescendants = (folderId: string): string[] => {
+            const children = [...state.items, ...state.trashedItems].filter(i => i.folder_id === folderId);
+            let descendants: string[] = [];
+            children.forEach(child => {
+                descendants.push(child.id);
+                if (child.type === 'folder') {
+                    descendants = [...descendants, ...getDescendants(child.id)];
+                }
+            });
+            return descendants;
+        };
+
+        let idsToDelete = [id];
+        if (item && item.type === 'folder') {
+            idsToDelete = [...idsToDelete, ...getDescendants(id)];
+        }
+        
+        // Remove duplicates
+        idsToDelete = [...new Set(idsToDelete)];
+
+        // Clean up storage for ALL items
+        for (const targetId of idsToDelete) {
+            const targetItem = [...state.items, ...state.trashedItems].find(i => i.id === targetId);
+            if (targetItem?.file_meta?.path) {
+                try {
+                    const { deleteFile } = await import('../../lib/supabase');
+                    await deleteFile(targetItem.file_meta.path);
+                } catch (err) {
+                    console.warn('[DataSlice] Failed to delete storage file:', targetItem.file_meta.path, err);
+                }
             }
         }
 
         set(state => ({
-            trashedItems: state.trashedItems.filter(i => i.id !== id)
+            trashedItems: state.trashedItems.filter(i => !idsToDelete.includes(i.id)),
+            items: state.items.filter(i => !idsToDelete.includes(i.id)) // Just in case
         }));
-        get().deleteItemFromDb(id);
+
+        // Queue deletes for ALL items
+        // We use a loop, or `persistentQueue` needs a bulk delete.
+        // Loop is fine for now.
+        idsToDelete.forEach(targetId => {
+            get().deleteItemFromDb(targetId);
+        });
     },
 
     emptyTrash: async () => {
         const { trashedItems } = get();
+        const trashedIds = trashedItems.map(i => i.id);
 
-        // Clean up all storage files first
+        if (trashedIds.length === 0) return;
+
+        // 1. Clean up storage files (Best effort)
         for (const item of trashedItems) {
             if (item.file_meta?.path) {
                 try {
@@ -398,10 +475,57 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
                     console.warn('[DataSlice] Failed to delete storage file:', item.file_meta.path, err);
                 }
             }
-            get().deleteItemFromDb(item.id);
         }
 
+        // 2. CRITICAL: Clear pending queue operations for these items.
+        // This prevents resurrection if a soft-delete upsert is still pending.
+        persistentSyncQueue.clearPendingForItems(trashedIds);
+        
+        // 3. TOMBSTONE: Locally ban these IDs immediately. 
+        // Even if server delete fails or lags, these will never show in UI again.
+        tombstoneManager.add(trashedIds);
+
+        const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
+        
+        // 4. Optimistically clear local state immediately
         set({ trashedItems: [] });
+
+        if (!isSupabaseConfigured()) {
+            // Offline: Queue individual deletes
+            trashedItems.forEach(item => {
+                get().deleteItemFromDb(item.id);
+            });
+            return;
+        }
+
+        // 4. SERVER-SIDE DELETION (Hard Delete by ID)
+        // We do not rely on server-side 'deleted_at' status. We explicitly delete these IDs.
+        try {
+            // Batch delete to avoid URL length limits
+            const BATCH_SIZE = 500;
+            for (let i = 0; i < trashedIds.length; i += BATCH_SIZE) {
+                const batch = trashedIds.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase
+                    .from('items')
+                    .delete()
+                    .in('id', batch);
+
+                if (error) throw error;
+            }
+            console.log(`[DataSlice] Trash emptied (${trashedIds.length} items deleted)`);
+
+        } catch (error) {
+            console.error('[DataSlice] Server-side batch delete failed.', error);
+            
+            // Fallback: Re-queue individual deletes to persistent queue
+            // This ensures they eventually get deleted even if the batch fail was transient
+            trashedItems.forEach(item => {
+                get().deleteItemFromDb(item.id);
+            });
+            
+            const state = get() as any;
+            state.addNotification?.('warning', 'Trash emptying slowly', 'Using fallback method due to network error.');
+        }
     },
 
     toggleItemComplete: (id) => {
@@ -480,6 +604,14 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         });
 
         get().refreshFolderCounts();
+
+        // Notify
+        (get() as any).addNotification(
+            'success',
+            `Moved ${ids.length} item${ids.length !== 1 ? 's' : ''}`,
+            'Undo',
+            () => get().undo()
+        );
     },
 
     // Search (Phase 3)
@@ -854,7 +986,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             (set as any)({ clipboard: { items: itemsToCopy, operation: 'copy' } });
         }
     },
-    pasteItems: (targetFolderId = null) => {
+    pasteItems: async (targetFolderId = null) => {
         const { clipboard, user } = get() as any;
         if (!clipboard.items.length || !clipboard.operation) return;
 
@@ -862,21 +994,78 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
         if (clipboard.operation === 'cut') {
             // Move items
-            get().moveItems(clipboard.items.map((i: Item) => i.id), targetFolderId);
+            await get().moveItems(clipboard.items.map((i: Item) => i.id), targetFolderId);
             (set as any)({ clipboard: { items: [], operation: null } });
         } else {
-            // Copy items (duplicate)
-            clipboard.items.forEach((item: Item) => {
+            // COPY OPERATION
+            const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
+            
+            // Separate folders from items
+            const foldersToCopy = clipboard.items.filter((i: Item) => i.type === 'folder');
+            const itemsToCopy = clipboard.items.filter((i: Item) => i.type !== 'folder');
+
+            // 1. Handle Folders (Deep Copy via RPC)
+            if (foldersToCopy.length > 0 && isSupabaseConfigured()) {
+                for (const folder of foldersToCopy) {
+                    try {
+                        const { error } = await supabase.rpc('copy_folder_recursive', {
+                            source_folder_id: folder.id,
+                            target_folder_id: targetFolderId,
+                            new_user_id: user?.id
+                        });
+
+                        if (error) throw error;
+                        console.log(`[DataSlice] Deep copied folder: ${folder.title}`);
+                    } catch (err) {
+                        console.error('[DataSlice] RPC copy failed, falling back to shallow copy', err);
+                        // Fallback: Just copy the folder itself (empty)
+                        const newFolder = {
+                            ...folder,
+                            id: crypto.randomUUID(),
+                            folder_id: targetFolderId,
+                            title: `${folder.title} (Copy)`,
+                            created_at: now,
+                            updated_at: now,
+                            user_id: user?.id || folder.user_id
+                        };
+                        get().addItem(newFolder);
+                    }
+                }
+            } else if (foldersToCopy.length > 0) {
+                // Offline fallback (Shallow copy only)
+                foldersToCopy.forEach((folder: Item) => {
+                     const newFolder = {
+                        ...folder,
+                        id: crypto.randomUUID(),
+                        folder_id: targetFolderId,
+                        title: `${folder.title} (Copy)`,
+                        created_at: now,
+                        updated_at: now,
+                        user_id: user?.id || folder.user_id
+                    };
+                    get().addItem(newFolder);
+                });
+                (get() as any).addNotification?.('warning', 'Deep Copy Unavailable', 'Only empty folders were copied while offline.');
+            }
+
+            // 2. Handle Regular Items (Client-side Duplicate)
+            itemsToCopy.forEach((item: Item) => {
                 const newItem = {
                     ...item,
                     id: crypto.randomUUID(),
                     folder_id: targetFolderId, // Paste into target
                     created_at: now,
                     updated_at: now,
-                    user_id: user?.id || item.user_id // Ensure user ownership
+                    user_id: user?.id || item.user_id
                 };
                 get().addItem(newItem);
             });
+
+            // Refresh to see new server-generated items
+            if (isSupabaseConfigured()) {
+                 setTimeout(() => get().loadUserData(), 1000); 
+            }
+            
             (set as any)({ clipboard: { items: [], operation: null } });
         }
     },

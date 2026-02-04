@@ -8,13 +8,10 @@ import { useAppStore } from '../../store/useAppStore';
 import { QuickActions } from './QuickActions';
 import { getRelativeTime } from '../../hooks/useKeyboardNavigation';
 
-// Date/Time indicator for due dates and reminders (SIMPLIFIED)
+// Date/Time indicator for due dates and reminders
 function DateTimeIndicator({ item }: { item: Item }) {
     const now = new Date();
-
-    // Get scheduled date from simplified field
     const scheduledDate = item.scheduled_at ? new Date(item.scheduled_at) : null;
-    // Calculate reminder time if remind_before is set
     const reminderDate = scheduledDate && item.remind_before
         ? new Date(scheduledDate.getTime() - item.remind_before * 60 * 1000)
         : null;
@@ -24,20 +21,11 @@ function DateTimeIndicator({ item }: { item: Item }) {
     const formatDateTime = (date: Date): string => {
         const isToday = date.toDateString() === now.toDateString();
         const isTomorrow = date.toDateString() === new Date(now.getTime() + 86400000).toDateString();
-
-        const timeStr = date.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-        });
+        const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
         if (isToday) return `Today, ${timeStr}`;
         if (isTomorrow) return `Tomorrow, ${timeStr}`;
-
-        return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric'
-        }) + `, ${timeStr}`;
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + `, ${timeStr}`;
     };
 
     const isOverdue = scheduledDate && scheduledDate < now && !item.is_completed;
@@ -63,7 +51,7 @@ function DateTimeIndicator({ item }: { item: Item }) {
 interface ItemCardProps {
     item: Item;
     compact?: boolean;
-    hideControls?: boolean;  // Hide selection indicator and quick actions (for task context)
+    hideControls?: boolean;
     variant?: 'masonry' | 'grid';
 }
 
@@ -80,7 +68,6 @@ interface CardEventProps {
     gridStyles?: React.CSSProperties;
 }
 
-// Map bg_color to CSS class
 function getCardColorClass(bgColor: string): string {
     const colorMap: Record<string, string> = {
         '#FFFFFF': 'card-default',
@@ -98,11 +85,9 @@ function getCardColorClass(bgColor: string): string {
     return colorMap[bgColor] || 'card-default';
 }
 
-// Get file extension from filename or mime type
 function getFileExtension(filename: string, mime?: string): string {
     if (filename) {
-        const ext = filename.split('.').pop()?.toLowerCase() || '';
-        return ext;
+        return filename.split('.').pop()?.toLowerCase() || '';
     }
     if (mime) {
         if (mime.includes('pdf')) return 'pdf';
@@ -113,7 +98,6 @@ function getFileExtension(filename: string, mime?: string): string {
     return '';
 }
 
-// File type icons with brand colors
 function FileTypeIcon({ extension }: { extension: string }) {
     const iconConfig: Record<string, { color: string; label: string; bg: string }> = {
         pdf: { color: '#DC2626', label: 'PDF', bg: '#FEE2E2' },
@@ -153,16 +137,6 @@ function FileTypeIcon({ extension }: { extension: string }) {
     );
 }
 
-// Selection indicator component
-function SelectionIndicator({ isSelected }: { isSelected: boolean }) {
-    return (
-        <div className={`card-selection-indicator ${isSelected ? 'selected' : ''}`}>
-            {isSelected && <Check size={12} />}
-        </div>
-    );
-}
-
-// Pin indicator component
 function PinIndicator({ isPinned }: { isPinned: boolean }) {
     if (!isPinned) return null;
     return (
@@ -172,7 +146,6 @@ function PinIndicator({ isPinned }: { isPinned: boolean }) {
     );
 }
 
-// Sync status indicator - shows if item hasn't synced to server yet
 function SyncStatusIndicator({ isUnsynced }: { isUnsynced?: boolean }) {
     if (!isUnsynced) return null;
     return (
@@ -182,7 +155,6 @@ function SyncStatusIndicator({ isUnsynced }: { isUnsynced?: boolean }) {
     );
 }
 
-// Tags display component - reusable across all card types
 function TagsDisplay({ tags }: { tags: string[] }) {
     if (!tags || tags.length === 0) return null;
     return (
@@ -219,52 +191,69 @@ function SecureImage({ path, alt, style }: { path: string; alt: string; style?: 
 
     useEffect(() => {
         if (!path) return;
-        // Don't try to sign public URLs or local blob URLs
         if (path.startsWith('http') || path.startsWith('blob:')) {
             setSrc(path);
             return;
         }
 
         let isMounted = true;
-
-        // Fetch signed URL
         supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600, {
-            transform: {
-                width: 300,
-                height: 300,
-                resize: 'cover', // crop to fit
+            transform: { width: 300, height: 300, resize: 'cover' }
+        }).then(({ data }) => {
+            if (isMounted && data?.signedUrl) {
+                setSrc(data.signedUrl);
+            } else {
+                const { data: publicData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path, {
+                    transform: { width: 300, height: 300, resize: 'cover' }
+                });
+                if (isMounted) setSrc(publicData.publicUrl);
             }
-        })
-            .then(({ data }) => {
-                if (isMounted && data?.signedUrl) {
-                    setSrc(data.signedUrl);
-                } else {
-                    // Fallback to Public URL with params
-                    const { data: publicData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path, {
-                        transform: {
-                            width: 300,
-                            height: 300,
-                            resize: 'cover',
-                        }
-                    });
-                    if (isMounted) setSrc(publicData.publicUrl);
-                }
-            });
+        });
 
         return () => { isMounted = false; };
     }, [path]);
 
-    // FIX: Render logic handles the case where path is already http
     const effectiveSrc = (path && path.startsWith('http')) ? path : src;
-
     if (!effectiveSrc) return <div style={{ ...style, background: '#f5f5f5' }} />;
     return <img src={effectiveSrc} alt={alt} style={style} />;
+}
+
+// Checkbox Component for Batch Selection
+function SelectionCheckbox({ isSelected, onClick }: { isSelected: boolean, onClick: (e: React.MouseEvent) => void }) {
+    return (
+        <div 
+            className={`selection-checkbox ${isSelected ? 'checked' : ''}`}
+            onClick={onClick}
+            style={{
+                position: 'absolute',
+                top: 8,
+                left: 8,
+                zIndex: 20,
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                border: '2px solid rgba(0,0,0,0.2)',
+                background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.8)',
+                borderColor: isSelected ? 'var(--primary)' : 'rgba(0,0,0,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: 'white',
+                opacity: isSelected ? 1 : 0, 
+                transition: 'all 0.2s ease',
+            }}
+        >
+            {isSelected && <Check size={12} strokeWidth={3} />}
+        </div>
+    );
 }
 
 export function ItemCard({ item, compact = false, hideControls = false, variant = 'masonry' }: ItemCardProps) {
     const {
         selectedItemIds,
         selectItem,
+        isSelectionMode,
         clipboard,
         setEditingItem,
         setSelectedFolder,
@@ -286,13 +275,13 @@ export function ItemCard({ item, compact = false, hideControls = false, variant 
     const handleClick = (e: React.MouseEvent) => {
         e.stopPropagation();
 
-        // Ctrl/Cmd+Click for multi-select
-        if (e.ctrlKey || e.metaKey) {
-            selectItem(item.id, true);
+        // 1. Selection Logic (Explicit only via Checkbox or Modifier)
+        if (isSelectionMode || e.ctrlKey || e.metaKey) {
+            selectItem(item.id, true, e.shiftKey);
             return;
         }
 
-        // Single-click opens the item (premium behavior)
+        // 2. Navigation Logic
         if (item.type === 'folder') {
             setSelectedFolder(item.id);
         } else if (item.type === 'image' || item.type === 'file') {
@@ -309,7 +298,9 @@ export function ItemCard({ item, compact = false, hideControls = false, variant 
 
     const handleDoubleClick = (e: React.MouseEvent) => {
         e.stopPropagation();
-        selectItem(item.id);
+        if (!isSelectionMode && !hideControls) {
+            selectItem(item.id);
+        }
     };
 
     const handleContextMenu = (e: React.MouseEvent) => {
@@ -319,95 +310,65 @@ export function ItemCard({ item, compact = false, hideControls = false, variant 
     };
 
     const handleDragStart = (e: React.DragEvent) => {
-        if (!isSelected) {
-            selectItem(item.id);
-        }
-        const idsToDrag = isSelected
+        // If not selected, select just this one for the drag (visually)
+        // We don't force selection state update to avoid re-render flicker
+        
+        const idsToDrag = isSelected && selectedItemIds.length > 0
             ? selectedItemIds
-            : [...selectedItemIds.filter(id => id !== item.id), item.id];
+            : [item.id];
 
         e.dataTransfer.setData('application/json', JSON.stringify(idsToDrag));
         e.dataTransfer.effectAllowed = 'move';
+        
+        // Native Ghost is used automatically.
+        // We do NOT set setDragImage here to allow the browser to snapshot the card.
     };
+
+    const cardProps: CardEventProps = {
+        isSelected,
+        isCut,
+        onClick: handleClick,
+        onDoubleClick: handleDoubleClick,
+        onContextMenu: handleContextMenu,
+        onDragStart: handleDragStart,
+        compact,
+        hideControls,
+        variant,
+        gridStyles
+    };
+
+    // Wrapper to handle Selection Checkbox & Draggability
+    const Wrapper = ({ children }: { children: React.ReactNode }) => (
+        <div 
+            className={`item-card-wrapper ${isSelectionMode ? 'selection-mode' : ''} ${isSelected ? 'selected' : ''}`}
+            style={{ position: 'relative', height: variant === 'grid' ? '100%' : 'auto' }}
+            draggable={!hideControls}
+            onDragStart={!hideControls ? handleDragStart : undefined}
+        >
+            {!hideControls && (
+                <SelectionCheckbox 
+                    isSelected={isSelected} 
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        selectItem(item.id, true);
+                    }} 
+                />
+            )}
+            {children}
+        </div>
+    );
 
     switch (item.type) {
         case 'note':
-            return (
-                <NoteCard
-                    item={item}
-                    colorClass={colorClass}
-                    isSelected={isSelected}
-                    isCut={isCut}
-                    onClick={handleClick}
-                    onDoubleClick={handleDoubleClick}
-                    onContextMenu={handleContextMenu}
-                    onDragStart={handleDragStart}
-                    compact={compact}
-                    hideControls={hideControls}
-                    variant={variant}
-                    gridStyles={gridStyles}
-                />
-            );
+            return <Wrapper><NoteCard item={item} colorClass={colorClass} {...cardProps} /></Wrapper>;
         case 'file':
-            return (
-                <FileCard
-                    item={item}
-                    isSelected={isSelected}
-                    isCut={isCut}
-                    onClick={handleClick}
-                    onDoubleClick={handleDoubleClick}
-                    onContextMenu={handleContextMenu}
-                    onDragStart={handleDragStart}
-                    hideControls={hideControls}
-                    variant={variant}
-                    gridStyles={gridStyles}
-                />
-            );
+            return <Wrapper><FileCard item={item} {...cardProps} /></Wrapper>;
         case 'link':
-            return (
-                <LinkCard
-                    item={item}
-                    isSelected={isSelected}
-                    isCut={isCut}
-                    onClick={handleClick}
-                    onDoubleClick={handleDoubleClick}
-                    onContextMenu={handleContextMenu}
-                    onDragStart={handleDragStart}
-                    hideControls={hideControls}
-                    variant={variant}
-                    gridStyles={gridStyles}
-                />
-            );
+            return <Wrapper><LinkCard item={item} {...cardProps} /></Wrapper>;
         case 'image':
-            return (
-                <ImageCard
-                    item={item}
-                    isSelected={isSelected}
-                    isCut={isCut}
-                    onClick={handleClick}
-                    onDoubleClick={handleDoubleClick}
-                    onContextMenu={handleContextMenu}
-                    onDragStart={handleDragStart}
-                    hideControls={hideControls}
-                    variant={variant}
-                    gridStyles={gridStyles}
-                />
-            );
+            return <Wrapper><ImageCard item={item} {...cardProps} /></Wrapper>;
         case 'folder':
-            return (
-                <FolderCard
-                    item={item}
-                    isSelected={isSelected}
-                    isCut={isCut}
-                    onClick={handleClick}
-                    onDoubleClick={handleDoubleClick}
-                    onContextMenu={handleContextMenu}
-                    onDragStart={handleDragStart}
-                    hideControls={hideControls}
-                    variant={variant}
-                    gridStyles={gridStyles}
-                />
-            );
+            return <Wrapper><FolderCard item={item} {...cardProps} /></Wrapper>;
         default:
             return null;
     }
@@ -419,7 +380,7 @@ interface NoteCardProps extends CardEventProps {
     colorClass: string;
 }
 
-function NoteCard({ item, colorClass, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart, compact, hideControls, variant, gridStyles }: NoteCardProps) {
+function NoteCard({ item, colorClass, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart: _onDragStart, compact, hideControls, variant, gridStyles }: NoteCardProps) {
     const { updateItem } = useAppStore();
 
     const content = useMemo(() => {
@@ -453,11 +414,9 @@ function NoteCard({ item, colorClass, isSelected, isCut, onClick, onDoubleClick,
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            draggable
-            onDragStart={onDragStart}
+            // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
-            {!hideControls && <SelectionIndicator isSelected={isSelected} />}
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
@@ -528,7 +487,7 @@ interface FileCardProps extends CardEventProps {
     item: Item;
 }
 
-function FileCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart, hideControls, variant, gridStyles }: FileCardProps) {
+function FileCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart: _onDragStart, hideControls, variant, gridStyles }: FileCardProps) {
     const fileMeta = useMemo(() => {
         if (isFileMeta(item.file_meta)) return item.file_meta;
         return null;
@@ -549,11 +508,9 @@ function FileCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMe
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            draggable
-            onDragStart={onDragStart}
+            // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
-            {!hideControls && <SelectionIndicator isSelected={isSelected} />}
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
@@ -587,7 +544,7 @@ interface LinkCardProps extends CardEventProps {
     item: Item;
 }
 
-function LinkCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart, hideControls, variant, gridStyles }: LinkCardProps) {
+function LinkCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart: _onDragStart, hideControls, variant, gridStyles }: LinkCardProps) {
     const content = useMemo(() => {
         if (isLinkContent(item.content)) return item.content;
         return { url: '' } as LinkContent;
@@ -607,11 +564,9 @@ function LinkCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMe
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            draggable
-            onDragStart={onDragStart}
+            // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
-            {!hideControls && <SelectionIndicator isSelected={isSelected} />}
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
@@ -660,7 +615,7 @@ interface ImageCardProps extends CardEventProps {
     item: Item;
 }
 
-function ImageCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart, hideControls, variant, gridStyles }: ImageCardProps) {
+function ImageCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart: _onDragStart, hideControls, variant, gridStyles }: ImageCardProps) {
     const fileMeta = item.file_meta as FileMeta | null;
     const fileSize = fileMeta ? formatFileSize(fileMeta.size) : '';
     const imagePath = fileMeta?.path;
@@ -689,11 +644,9 @@ function ImageCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextM
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            draggable
-            onDragStart={onDragStart}
+            // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
-            {!hideControls && <SelectionIndicator isSelected={isSelected} />}
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
@@ -754,7 +707,7 @@ interface FolderCardProps extends CardEventProps {
     item: Item;
 }
 
-function FolderCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart, hideControls, variant, gridStyles }: FolderCardProps) {
+function FolderCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMenu, onDragStart: _onDragStart, hideControls, variant, gridStyles }: FolderCardProps) {
     const content = item.content as FolderContent;
     const allItems = useAppStore((state) => state.items);
     const dynamicItemCount = allItems.filter(i => i.folder_id === item.id && !i.deleted_at).length;
@@ -771,11 +724,9 @@ function FolderCard({ item, isSelected, isCut, onClick, onDoubleClick, onContext
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            draggable
-            onDragStart={onDragStart}
+            // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
-            {!hideControls && <SelectionIndicator isSelected={isSelected} />}
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 

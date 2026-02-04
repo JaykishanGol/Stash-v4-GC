@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, File, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Code } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, File, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Code, Upload, RotateCcw } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { supabase, STORAGE_BUCKET } from '../../lib/supabase';
+import { supabase, STORAGE_BUCKET, uploadFile } from '../../lib/supabase';
+import { generateId } from '../../lib/utils';
 import type { FileMeta } from '../../lib/types';
 
 // Helper to determine accurate file type
@@ -25,14 +26,26 @@ const getFileType = (mime: string, path: string) => {
 };
 
 export function FilePreviewModal() {
-    const { previewingItem, setPreviewingItem, items, selectedFolderId } = useAppStore();
+    const { 
+        previewingItem, 
+        setPreviewingItem, 
+        items, 
+        selectedFolderId,
+        updateItem, 
+        addUpload, 
+        updateUploadProgress, 
+        completeUpload,
+        user
+    } = useAppStore();
     const [publicUrl, setPublicUrl] = useState<string | null>(null);
     const [textContent, setTextContent] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [scale, setScale] = useState(1);
     const [lastItemId, setLastItemId] = useState<string | null>(null);
+    
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Reset state when previewing item changes (Render-time update to avoid useEffect cascade)
+    // Reset state when previewing item changes
     const currentId = previewingItem?.id ?? null;
     if (currentId !== lastItemId) {
         setLastItemId(currentId);
@@ -48,15 +61,12 @@ export function FilePreviewModal() {
     const getSiblingItem = useCallback((direction: 'next' | 'prev') => {
         if (!previewingItem) return null;
 
-        // Filter visible items in the current context (folder or root)
         const currentContextItems = items.filter(i => {
-            // Must be a file/image and match current folder context
             const isFile = i.type === 'file' || i.type === 'image';
             const contextMatch = selectedFolderId ? i.folder_id === selectedFolderId : !i.folder_id;
             return isFile && contextMatch && !i.deleted_at;
         });
 
-        // Sort by updated_at (or however the view is sorted, ideally matching view logic)
         currentContextItems.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
         const currentIndex = currentContextItems.findIndex(i => i.id === previewingItem.id);
@@ -74,12 +84,11 @@ export function FilePreviewModal() {
         const sibling = getSiblingItem(direction);
         if (sibling) {
             setPreviewingItem(sibling);
-            setScale(1); // Reset zoom
-            setTextContent(null); // Reset text
+            setScale(1);
+            setTextContent(null);
         }
     }, [getSiblingItem, setPreviewingItem]);
 
-    // Must be defined BEFORE useEffect that uses it
     const handleClose = useCallback(() => {
         setPreviewingItem(null);
         setPublicUrl(null);
@@ -106,7 +115,6 @@ export function FilePreviewModal() {
             const mime = previewingItem.file_meta.mime || '';
             const type = getFileType(mime, path);
 
-            // 1. Generate URL logic
             const fetchUrl = async () => {
                 if (path.startsWith('http')) {
                     setPublicUrl(path);
@@ -118,7 +126,6 @@ export function FilePreviewModal() {
                 if (data?.signedUrl) {
                     setPublicUrl(data.signedUrl);
 
-                    // 2. If Code/Text, download content
                     if (type === 'code') {
                         try {
                             const response = await fetch(data.signedUrl);
@@ -136,6 +143,62 @@ export function FilePreviewModal() {
             fetchUrl();
         }
     }, [previewingItem, lastItemId]);
+
+    // Replace File Handler
+    const handleReplaceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !previewingItem) return;
+
+        const uploadId = generateId();
+        const isImage = file.type.startsWith('image/');
+        addUpload(uploadId, `Updating: ${file.name}`);
+
+        try {
+            // 1. Upload new file (Creates NEW path, keeping history safe)
+            // We use standard uploadFile helper which handles retry logic
+            const { path, error } = await uploadFile(
+                file,
+                user?.id || 'demo',
+                isImage ? 'image' : 'file',
+                (progress) => updateUploadProgress(uploadId, progress, '1 MB/s')
+            );
+
+            if (error) throw error;
+
+            completeUpload(uploadId, true);
+
+            // 2. Update existing item metadata
+            // DB trigger will automatically log the version change
+            const updates = {
+                file_meta: {
+                    size: file.size,
+                    mime: file.type,
+                    path: path,
+                    originalName: file.name
+                },
+                updated_at: new Date().toISOString()
+            };
+
+            updateItem(previewingItem.id, updates);
+            
+            // 3. Refresh Preview locally
+            // We force a refresh by clearing the URL. The existing useEffect will catch the new item state.
+            setPublicUrl(null);
+            setIsLoading(true);
+            
+            // 4. Force refetch of URL immediately to feel snappy
+            const { data } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
+            if (data?.signedUrl) setPublicUrl(data.signedUrl);
+            setIsLoading(false);
+
+        } catch (err) {
+            console.error('Replacement failed:', err);
+            completeUpload(uploadId, false, (err as Error).message);
+        } finally {
+            // Reset input
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
 
     if (!previewingItem) return null;
 
@@ -167,6 +230,13 @@ export function FilePreviewModal() {
                 justifyContent: 'center'
             }}
         >
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                style={{ display: 'none' }} 
+                onChange={handleReplaceFile}
+            />
+
             {/* Navigation Buttons */}
             <button
                 className="nav-btn prev"
@@ -233,6 +303,9 @@ export function FilePreviewModal() {
                                 <button onClick={() => setScale(s => Math.min(3, s + 0.25))} className="icon-btn-sm"><ZoomIn size={16} /></button>
                             </div>
                         )}
+                        <button onClick={() => fileInputRef.current?.click()} className="icon-btn" title="Replace File (Upload New Version)">
+                            <RotateCcw size={20} />
+                        </button>
                         <button onClick={handleOpenInNewTab} className="icon-btn" title="Open in new tab"><ExternalLink size={20} /></button>
                         <button onClick={handleDownload} className="icon-btn" title="Download"><Download size={20} /></button>
                         <button onClick={handleClose} className="icon-btn" title="Close"><X size={24} /></button>

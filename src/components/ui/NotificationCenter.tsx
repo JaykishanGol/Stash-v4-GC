@@ -80,6 +80,19 @@ export function NotificationCenter() {
         return date.toLocaleDateString();
     };
 
+    const handleNotificationClick = (notification: any) => {
+        markNotificationRead(notification.id);
+        
+        // Try to navigate if there's context
+        // We look for entity info in the message or data (if we added structured data support)
+        // Since we don't have structured data in local notifications yet, we'll try to find items by title for now, 
+        // or just rely on the user manually navigating. 
+        // Ideally, we'd add `data: { entityId: ... }` to `addNotification`.
+        
+        // For now, just toggling the dropdown is good UX
+        setIsOpen(false);
+    };
+
     return (
         <div
             className="notification-center"
@@ -247,7 +260,7 @@ export function NotificationCenter() {
                             notifications.map((notification) => (
                                 <div
                                     key={notification.id}
-                                    onClick={() => markNotificationRead(notification.id)}
+                                    onClick={() => handleNotificationClick(notification)}
                                     style={{
                                         display: 'flex',
                                         gap: 12,

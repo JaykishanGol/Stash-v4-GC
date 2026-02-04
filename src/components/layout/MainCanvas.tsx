@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense, useMemo } from 'react';
 import { useLocation } from 'wouter';
 import {
     Plus,
@@ -14,13 +14,13 @@ import {
     CalendarDays,
     Calendar,
     ListTodo,
-    Loader2
+    Loader2,
+    Trash2
 } from 'lucide-react';
 import Masonry from 'react-masonry-css';
 
-
-
 import { useAppStore } from '../../store/useAppStore';
+import { useFilteredItems } from '../../hooks/useFilteredItems'; // NEW HOOK
 import { ItemCard } from '../cards/ItemCard';
 import { QuickActions } from '../cards/QuickActions';
 import { NotificationCenter } from '../ui/NotificationCenter';
@@ -263,8 +263,6 @@ export function MainCanvas() {
         activeView,
         viewMode,
         setViewMode,
-        getFilteredItems,
-        getFilteredTasks,
         clearSelection,
         trashedItems,
         restoreItem,
@@ -274,8 +272,12 @@ export function MainCanvas() {
         selectedFolderId,
         setSelectedFolder,
         openContextMenu,
-        selectedTaskId
+        selectedTaskId,
+        emptyTrash // ADDED
     } = useAppStore();
+
+    // High-Performance Memoized Filter
+    const { items: filteredItems, tasks: filteredTasks } = useFilteredItems();
 
     // Update time every minute
     useEffect(() => {
@@ -365,11 +367,26 @@ export function MainCanvas() {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    // Filter Logic
-    const filteredItems = getFilteredItems();
-    const filteredTasks = getFilteredTasks();
-    const displayItemsRaw = [...filteredItems, ...filteredTasks];
-    displayItemsRaw.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    // Memoize the display list to avoid expensive recalculations on every scroll
+    const displayItemsRaw = useMemo(() => {
+        // Only include tasks in views that actually render them (Agenda views)
+        const showTasks = ['scheduled', 'overdue'].includes(activeView);
+        
+        if (showTasks) {
+            const combined = [...filteredItems, ...filteredTasks];
+            // Sort by date for agenda
+            return combined.sort((a, b) => {
+                const dateA = new Date((a as any).scheduled_at || 0).getTime();
+                const dateB = new Date((b as any).scheduled_at || 0).getTime();
+                return dateA - dateB;
+            });
+        }
+        
+        // For standard grid views (Home, All, Notes, etc), show ONLY Items
+        // Tasks are not compatible with ItemCard
+        return filteredItems;
+    }, [activeView, filteredItems, filteredTasks]);
+
     const displayItems = activeView === 'home' ? displayItemsRaw.slice(0, 6) : displayItemsRaw;
 
     const hasFilters = searchQuery || filters.type !== null || filters.priority !== null;
@@ -470,6 +487,20 @@ export function MainCanvas() {
                 </div>
 
                 <div className="header-actions">
+                    {activeView === 'trash' && trashedItems.length > 0 && (
+                        <button 
+                            className="action-pill-btn danger" 
+                            onClick={() => {
+                                if (confirm('Are you sure you want to permanently delete all items in Trash?')) {
+                                    emptyTrash();
+                                }
+                            }}
+                            style={{ marginRight: 8, borderColor: '#FECACA', color: '#DC2626', background: '#FEF2F2' }}
+                        >
+                            <Trash2 size={16} />
+                            Empty Trash
+                        </button>
+                    )}
                     <button className="action-pill-btn" id="btn-due">
                         <span className="status-text">
                             <span>{todayStats.dueToday}</span>
@@ -529,16 +560,35 @@ export function MainCanvas() {
 
                     <div style={{ flexGrow: 1, width: '100%' }}>
                         {isTrashView ? (
-                            <div className="items-list-container standard-list">
-                                {trashedItems.map((item) => (
-                                    <div key={item.id} className="trash-item-wrapper" style={{ position: 'relative' }}>
-                                        <ItemCard item={item} />
-                                        <button className="restore-btn" onClick={(e) => { e.stopPropagation(); restoreItem(item.id); }}>
-                                            <RotateCcw size={12} /> Restore
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
+                            viewMode === 'grid' ? (
+                                <div className="masonry-container" style={{ padding: '8px 0' }}>
+                                    <Masonry
+                                        breakpointCols={{ default: 4, 1400: 3, 1100: 2, 700: 1 }}
+                                        className="masonry-grid"
+                                        columnClassName="masonry-grid-column"
+                                    >
+                                        {trashedItems.map((item) => (
+                                            <div key={item.id} className="trash-item-wrapper" style={{ position: 'relative', marginBottom: 20 }}>
+                                                <ItemCard item={item} variant="masonry" />
+                                                <button className="restore-btn" onClick={(e) => { e.stopPropagation(); restoreItem(item.id); }} style={{ position: 'absolute', top: 8, right: 8, zIndex: 10, background: 'white', padding: '4px 8px', borderRadius: 4, border: '1px solid #ddd', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                                                    <RotateCcw size={12} /> Restore
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </Masonry>
+                                </div>
+                            ) : (
+                                <div className="items-list">
+                                    {trashedItems.map((item) => (
+                                        <div key={item.id} className="trash-item-wrapper" style={{ position: 'relative' }}>
+                                            <ItemCard item={item} variant="grid" />
+                                            <button className="restore-btn" onClick={(e) => { e.stopPropagation(); restoreItem(item.id); }} style={{ marginLeft: 'auto', background: 'white', padding: '4px 8px', borderRadius: 4, border: '1px solid #ddd', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                                                <RotateCcw size={12} /> Restore
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
                         ) : (activeView === 'scheduled' || activeView === 'overdue') ? (
                             <div>
                                 <SchedulerItemsView items={displayItems} tasks={filteredTasks} viewType={activeView as 'scheduled' | 'overdue'} />

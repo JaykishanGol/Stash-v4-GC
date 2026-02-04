@@ -49,51 +49,54 @@ export async function clearPendingShares() {
 }
 
 /**
- * Converts raw share data into a Stash Item
+ * Converts raw share data into Stash Items
  */
-export function processShare(share: ShareData, userId: string): Item | null {
+export function processShare(share: ShareData, userId: string): Item[] {
     const now = new Date().toISOString();
+    const items: Item[] = [];
 
     // 1. Files
     if (share.files && share.files.length > 0) {
-        const file = share.files[0];
-        const blob = new Blob([file.buffer], { type: file.type });
-        const objectUrl = URL.createObjectURL(blob);
+        for (const file of share.files) {
+            const blob = new Blob([file.buffer], { type: file.type });
+            const objectUrl = URL.createObjectURL(blob);
 
-        return {
-            id: generateId(),
-            user_id: userId,
-            folder_id: null,
-            type: file.type.startsWith('image/') ? 'image' : 'file',
-            title: share.title || file.name,
-            content: {
-                url: objectUrl,
-                preview: objectUrl
-            },
-            file_meta: {
-                size: file.buffer.byteLength,
-                mime: file.type,
-                path: objectUrl,
-                originalName: file.name
-            },
-            priority: 'none',
-            tags: ['shared'],
-            scheduled_at: null,
-            remind_before: null,
-            recurring_config: null,
-            bg_color: '',
-            is_pinned: false,
-            is_archived: false,
-            is_completed: false,
-            created_at: now,
-            updated_at: now,
-            deleted_at: null
-        } as Item;
+            items.push({
+                id: generateId(),
+                user_id: userId,
+                folder_id: null,
+                type: file.type.startsWith('image/') ? 'image' : 'file',
+                title: share.title || file.name,
+                content: {
+                    url: objectUrl,
+                    preview: objectUrl
+                },
+                file_meta: {
+                    size: file.buffer.byteLength,
+                    mime: file.type,
+                    path: objectUrl,
+                    originalName: file.name
+                },
+                priority: 'none',
+                tags: ['shared'],
+                scheduled_at: null,
+                remind_before: null,
+                recurring_config: null,
+                bg_color: '',
+                is_pinned: false,
+                is_archived: false,
+                is_completed: false,
+                created_at: now,
+                updated_at: now,
+                deleted_at: null
+            } as Item);
+        }
+        return items;
     }
 
     // 2. Link
     if (share.url) {
-        return {
+        items.push({
             id: generateId(),
             user_id: userId,
             folder_id: null,
@@ -116,12 +119,13 @@ export function processShare(share: ShareData, userId: string): Item | null {
             created_at: now,
             updated_at: now,
             deleted_at: null
-        };
+        });
+        return items;
     }
 
     // 3. Text Note
     if (share.text || share.title) {
-        return {
+        items.push({
             id: generateId(),
             user_id: userId,
             folder_id: null,
@@ -143,8 +147,9 @@ export function processShare(share: ShareData, userId: string): Item | null {
             created_at: now,
             updated_at: now,
             deleted_at: null
-        };
+        });
+        return items;
     }
 
-    return null;
+    return [];
 }

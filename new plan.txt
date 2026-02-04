@@ -1,755 +1,1200 @@
-# Comprehensive Production & Enterprise Readiness Audit for Stash-v4-GC
+Based on my analysis of the Stash-v4-GC repository, here are the answers to all your questions:
 
-## Context
-I need you to perform an exhaustive audit of my Stash-v4-GC application - a productivity app with Google Calendar/Tasks/Keep synchronization. The app is built with React 19.2 + TypeScript + Vite + Supabase + Zustand + TanStack Query + TipTap + Wouter.
+## ✅ ANSWERS FROM REPOSITORY ANALYSIS
+
+### 1. **Database Structure**
+
+**Current Tables:**
+- **`items`** - Main table for notes/folders/items (type field: 'note', 'folder')
+  - Has: `id`, `user_id`, `type`, `title`, `content` (JSONB), `folder_id`, `tags[]`, `is_pinned`, `is_completed`, `priority`, `due_at`, `bg_color`, `remind_at`, `reminder_recurring`, `deleted_at`, `created_at`, `updated_at`
+- **`tasks`** - Task management with item relationships
+  - Has: `id`, `user_id`, `list_id`, `title`, `description`, `color`, `priority`, `item_ids[]`, `item_completion` (JSONB), `is_completed`, `due_at`, `remind_at`, `reminder_recurring`, `deleted_at`, `created_at`, `updated_at`
+- **`lists`** - Custom lists/collections
+  - Has: `id`, `user_id`, `name`, `color`, `order`, `items[]`
+- **`google_resource_links`** - Google sync mapping
+  - Maps local items/tasks to Google Calendar events and Google Tasks
+  - Has: `local_id`, `local_type`, `google_id`, `resource_type`, `etag`, `calendar_id`, `task_list_id`, `last_synced_at`
+
+**JSONB Usage:**
+- ✅ `items.content` - TipTap JSON content (rich text)
+- ✅ `tasks.item_completion` - Map of item completion status `{"itemId": true/false}`
+
+**Soft Delete:**
+- ✅ Using `deleted_at` timestamp (NULL = active, timestamp = deleted)
+- No separate trash table
+
+**Attachments:**
+- ✅ Supabase Storage bucket: `stash_vault`
+- Storage path: `{user_id}/{item_id}/...`
+- RLS policies for user isolation implemented
+
+### 2. **Content Operations**
+
+**Currently Missing Cut/Copy/Paste:**
+- ❌ No clipboard store in codebase
+- ❌ No cut/copy/paste operations implemented
+- **Needs:** Both item-level (entire notes/tasks) AND content-level (TipTap rich text)
+- **Should Support:** Cross-device clipboard via Supabase (store in DB temporarily)
+- **Rich Text:** Copy with formatting (TipTap JSON format)
+
+### 3. **Item Management**
+
+**Current Features:**
+- ✅ Move between folders (via `folder_id` update)
+- ❌ No duplicate function found
+- ❌ No merge function
+- ❌ No split function
+- ❌ No batch operations UI (but DB supports it)
+
+**Needed:**
+- Batch selection UI
+- Multi-select with checkboxes
+- Bulk actions toolbar
+
+### 4. **Storage Strategy**
+
+**Current Implementation:**
+- ✅ Supabase Storage (`stash_vault` bucket)
+- ✅ User isolation via RLS
+- **File Types:** Not specified (likely images primarily)
+- **Size Limit:** Not defined in code
+- ❌ No image compression before upload
+- ❌ No version history for notes
+
+**Needs:**
+- Image compression (browser-image-compression library)
+- File type validation
+- Size limits
+- Thumbnail generation
+- Version history table
+
+### 5. **Undo/Redo Logic**
+
+**Current:**
+- ✅ TipTap has built-in content-level undo/redo
+- ❌ No app-level undo/redo for deletes, moves, etc.
+
+**Needs:**
+- History stack in Zustand
+- Undo for: delete, move, archive operations
+- 20-50 levels of history
+
+### 6. **Sync & Conflict Resolution**
+
+**Current Strategy:**
+- ✅ Soft delete with `deleted_at` timestamp
+- ✅ `updated_at` triggers for sync detection
+- ✅ Google sync via `google_resource_links` table
+- ❌ No explicit conflict resolution logic found
+- **Appears to use:** Last Write Wins (based on `updated_at`)
+
+**Needs:**
+- Optimistic updates with TanStack Query (likely implemented but need to verify)
+- Conflict detection UI
+- Manual conflict resolution option
+- Offline queue for failed operations
+
+### 7. **Data Relationships**
+
+**Current Relationships:**
+- ✅ Items can be inside folders (`folder_id`)
+- ✅ Tasks have array of item IDs (`item_ids[]`)
+- ✅ Tasks can contain multiple items (checklist style)
+- ✅ Lists contain items (`items[]` array)
+- ❌ No bidirectional note-to-note links
+- ❌ No backlinks
+
+**Structure:**
+```
+items (notes/folders)
+  └─ folder_id → parent item
+  
+tasks
+  ├─ list_id → list
+  └─ item_ids[] → items (many-to-many via array)
+  
+lists
+  └─ items[] → item IDs
+```
+
+### 8. **Google Integration**
+
+**Current Implementation:**
+- ✅ `google_resource_links` table maps local ↔ Google
+- ✅ Tracks `etag` for version control
+- ✅ Stores `calendar_id` and `task_list_id`
+- ❌ Delete sync logic not visible in schema
+
+**Needs:**
+- Two-way delete sync handling
+- Conflict resolution when deleted on one side
+- Orphaned link cleanup
+
+### 9. **Performance Concerns**
+
+**Current Optimizations:**
+- ✅ Trigram extension (`pg_trgm`) for fuzzy search
+- ✅ GIN indexes on title and content
+- ✅ Search RPC function (server-side)
+- ✅ Recursive folder delete function (prevents client-side loops)
+- ✅ `handle_item_deletion()` trigger for referential integrity
+
+**Expected Scale:**
+- Target: 1,000-10,000 items per user
+- **Needs:** Pagination or infinite scroll (not yet implemented)
+- **Needs:** Virtual scrolling (react-window installed but need to check usage)
+
+### 10. **Special Requirements**
+
+**Currently Missing:**
+- ❌ Templates system
+- ❌ Import from other apps
+- ❌ Export in multiple formats
+- ❌ Drag-and-drop implementation
+- ❌ Keyboard shortcuts
+- ❌ Mobile gestures (swipe to delete)
+
+***
+
+## 📋 REFINED PROMPT WITH ACTUAL CONTEXT
+
+Now I'll create the ultimate prompt with this context:
+
+```markdown
+# Comprehensive Database, Storage & Item Operations Implementation for Stash-v4-GC
+
+## Project Context
 
 **Repository:** https://github.com/JaykishanGol/Stash-v4-GC
+**Stack:** React 19.2 + TypeScript + Supabase + Zustand + TanStack Query + TipTap + Wouter
 
-## Your Mission
-Analyze every aspect of this application as if you're preparing it for:
-1. **Enterprise deployment** (Fortune 500 company standards)
-2. **Production launch** (100,000+ users)
-3. **Mobile-first PWA** with native-like experience
-4. **App store submission** (if packaged as TWA/Capacitor)
+## Current State Analysis
 
----
+### Existing Database Schema
 
-## PART 1: PRODUCTION READINESS AUDIT
+**Tables Implemented:**
+1. **`items`** table - Notes and folders with:
+   - Rich text content (JSONB TipTap format)
+   - Hierarchical folders (`folder_id`)
+   - Tags array, pinning, completion
+   - Priority and due dates
+   - Soft delete (`deleted_at`)
+   - Colors and metadata
 
-### 1.1 Security Analysis
+2. **`tasks`** table - Task management with:
+   - Relationships to items via `item_ids[]` array
+   - Item completion tracking (JSONB map)
+   - List membership (`list_id`)
+   - Priority, due dates, reminders
+   - Recurring reminders
 
-**Authentication & Authorization:**
-- [ ] Review Supabase Auth implementation
-- [ ] Check JWT token handling and refresh logic
-- [ ] Verify session management and timeout handling
-- [ ] Analyze OAuth flow for Google integration
-- [ ] Check for exposed secrets or API keys
-- [ ] Review environment variable handling
-- [ ] Verify secure storage of sensitive data
+3. **`lists`** table - Custom collections:
+   - Item references (`items[]` array)
+   - Color and ordering
 
-**Database Security:**
-- [ ] Audit all Row Level Security (RLS) policies
-- [ ] Check for SQL injection vulnerabilities
-- [ ] Review database function security (SECURITY DEFINER usage)
-- [ ] Verify user data isolation
-- [ ] Check for data leakage through RLS bypasses
-- [ ] Analyze audit log implementation
+4. **`google_resource_links`** - Google sync:
+   - Maps local items/tasks to Google Calendar/Tasks
+   - Stores ETags for versioning
+   - Tracks last sync time
 
-**Frontend Security:**
-- [ ] XSS prevention in TipTap rich text editor
-- [ ] CSRF protection mechanisms
-- [ ] Content Security Policy (CSP) headers
-- [ ] Input validation and sanitization
-- [ ] Safe HTML rendering practices
-- [ ] Third-party script security
-- [ ] Dependency vulnerability scan (npm audit)
+**Storage:**
+- Supabase Storage bucket: `stash_vault`
+- Path structure: `{user_id}/{item_id}/filename`
+- RLS policies for user isolation
 
-**API Security:**
-- [ ] Rate limiting implementation
-- [ ] API key rotation strategy
-- [ ] CORS configuration
-- [ ] Request payload validation
-- [ ] Error message information leakage
-- [ ] Google API quota management
+**Performance Features:**
+- PostgreSQL trigram extension for fuzzy search
+- GIN indexes on title and content
+- Server-side recursive folder deletion
+- Automatic referential integrity (triggers)
+- Search RPC function with ranking
 
-**Questions to Answer:**
-1. Can users access other users' data through any vector?
-2. Are all inputs properly validated and sanitized?
-3. Is sensitive data encrypted at rest and in transit?
-4. Are there any security headers missing?
-5. How is the app protected against common OWASP Top 10 vulnerabilities?
+### What's Missing
 
----
-
-### 1.2 Performance & Scalability
-
-**Frontend Performance:**
-- [ ] Bundle size analysis (target: < 300KB gzipped)
-- [ ] Code splitting implementation
-- [ ] Lazy loading strategy
-- [ ] Tree shaking effectiveness
-- [ ] Image optimization
-- [ ] Font loading strategy
-- [ ] Critical CSS extraction
-- [ ] JavaScript execution time
-- [ ] Time to Interactive (TTI)
-- [ ] First Contentful Paint (FCP)
-- [ ] Largest Contentful Paint (LCP)
-- [ ] Cumulative Layout Shift (CLS)
-
-**React Performance:**
-- [ ] Unnecessary re-renders (React DevTools Profiler)
-- [ ] Component memoization opportunities
-- [ ] Large list virtualization (react-window usage)
-- [ ] useCallback/useMemo usage patterns
-- [ ] Context API performance impacts
-- [ ] Zustand selector optimization
-- [ ] TanStack Query configuration (staleTime, cacheTime)
-
-**TipTap Editor Performance:**
-- [ ] Large document handling (10,000+ words)
-- [ ] Real-time collaboration performance
-- [ ] Undo/redo stack memory management
-- [ ] Extension loading strategy
-- [ ] Content serialization efficiency
-
-**Database Performance:**
-- [ ] Query optimization (EXPLAIN ANALYZE)
-- [ ] Index coverage for common queries
-- [ ] N+1 query prevention
-- [ ] Pagination implementation
-- [ ] Real-time subscription efficiency
-- [ ] Connection pooling
-- [ ] Database migration strategy
-
-**Network Performance:**
-- [ ] API response times
-- [ ] Payload sizes
-- [ ] Caching strategy (HTTP cache headers)
-- [ ] Service worker caching
-- [ ] Offline data sync strategy
-- [ ] CDN usage for static assets
-- [ ] Compression (Brotli/Gzip)
-
-**Scalability Concerns:**
-1. How does the app perform with 10,000 notes?
-2. Can it handle 100 concurrent real-time users?
-3. What's the database query performance at scale?
-4. Are there any memory leaks?
-5. How does Google sync perform with large datasets?
+**CRITICAL GAPS:**
+1. ❌ No clipboard system (cut/copy/paste)
+2. ❌ No batch operations UI
+3. ❌ No duplicate/merge/split functions
+4. ❌ No image compression before upload
+5. ❌ No version history
+6. ❌ No app-level undo/redo
+7. ❌ No conflict resolution UI
+8. ❌ No drag-and-drop
+9. ❌ No keyboard shortcuts
+10. ❌ No export/import functions
+11. ❌ No templates system
+12. ❌ No pagination implementation
 
 ---
 
-### 1.3 Reliability & Error Handling
+## PART 1: COMPLETE CLIPBOARD SYSTEM
 
-**Error Boundaries:**
-- [ ] Component-level error boundaries
-- [ ] Route-level error boundaries
-- [ ] Fallback UI quality
-- [ ] Error recovery mechanisms
+### 1.1 Three-Level Clipboard Architecture
 
-**API Error Handling:**
-- [ ] Network failure recovery
-- [ ] Retry logic with exponential backoff
-- [ ] Timeout handling
-- [ ] Rate limit handling
-- [ ] Graceful degradation
-- [ ] User-friendly error messages
+Design a comprehensive clipboard system with:
 
-**Data Integrity:**
-- [ ] Transaction handling in Supabase
-- [ ] Conflict resolution strategy
-- [ ] Data validation before save
-- [ ] Optimistic update rollback
-- [ ] Audit trail for data changes
+**Level 1: Native Browser Clipboard (Text Only)**
+```typescript
+// Basic text copy/paste using Clipboard API
+async function copyTextToClipboard(text: string): Promise<void>
+async function pasteTextFromClipboard(): Promise<string>
+```
 
-**Offline Functionality:**
-- [ ] Service worker implementation
-- [ ] Background sync for failed requests
-- [ ] Conflict resolution on reconnect
-- [ ] Local storage strategy
-- [ ] IndexedDB usage for large data
+**Level 2: TipTap Rich Text Clipboard**
+```typescript
+// Within editor - preserve formatting
+// Use TipTap's built-in clipboard with custom extensions
+// Support: Bold, Italic, Lists, Links, Code blocks, Tables
 
-**Monitoring & Logging:**
-- [ ] Error tracking setup (Sentry, LogRocket, etc.)
-- [ ] Performance monitoring
-- [ ] User analytics
-- [ ] Console log cleanup (no logs in production)
-- [ ] Source map configuration
+const ClipboardExtension = Extension.create({
+  name: 'customClipboard',
+  // Handle rich content copy/paste
+  // Preserve TipTap JSON structure
+})
+```
 
-**Questions:**
-1. What happens when Supabase is down?
-2. How are sync conflicts resolved?
-3. Can users recover from errors without losing data?
-4. Is there a backup/restore mechanism?
+**Level 3: App-Level Item Clipboard (Cross-Device)**
+```typescript
+// Store in Zustand + Supabase for cross-device support
 
----
+interface ClipboardStore {
+  action: 'copy' | 'cut' | null;
+  itemType: 'note' | 'task' | 'folder' | 'list' | null;
+  itemIds: string[];
+  data: any[];
+  timestamp: number;
+}
 
-### 1.4 Code Quality & Maintainability
+// Sync clipboard to Supabase (ephemeral table, 24hr TTL)
+CREATE TABLE clipboard_cache (
+  user_id UUID PRIMARY KEY,
+  action TEXT,
+  item_type TEXT,
+  item_data JSONB,
+  expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '24 hours')
+);
+```
 
-**TypeScript Quality:**
-- [ ] Strict mode enabled
-- [ ] No `any` types (or justified usage)
-- [ ] Proper interface definitions
-- [ ] Type guard usage
-- [ ] Generic usage patterns
-- [ ] Enum vs union type choices
+### 1.2 Copy Implementation
 
-**Code Organization:**
-- [ ] Folder structure clarity
-- [ ] Component organization
-- [ ] Custom hook extraction
-- [ ] Utility function organization
-- [ ] Type definitions location
-- [ ] Consistent naming conventions
+**Requirements:**
+- Copy single or multiple items (notes, tasks, folders, lists)
+- Copy with all relationships (tasks → items, lists → items)
+- Copy with attachments (duplicate files in storage)
+- Visual feedback (toast notification)
+- Keyboard shortcut: Cmd/Ctrl+C
 
-**React Best Practices:**
-- [ ] Component composition patterns
-- [ ] Prop drilling vs context usage
-- [ ] Custom hook patterns
-- [ ] Side effect management
-- [ ] Dependency array correctness
-- [ ] Key prop usage in lists
+**Implementation:**
+```typescript
+// Provide complete implementation for:
 
-**State Management (Zustand):**
-- [ ] Store organization and splitting
-- [ ] Selector performance
-- [ ] Middleware usage (persist, immer)
-- [ ] Action naming conventions
-- [ ] Store testing strategy
+1. copyNote(noteId: string): Promise<void>
+2. copyMultipleNotes(noteIds: string[]): Promise<void>
+3. copyTask(taskId: string): Promise<void>
+4. copyFolder(folderId: string, includeChildren: boolean): Promise<void>
+5. copyWithAttachments(itemId: string): Promise<void>
+6. syncClipboardToDatabase(): Promise<void>
+```
 
-**Code Duplication:**
-- [ ] DRY principle adherence
-- [ ] Reusable component extraction
-- [ ] Shared utility functions
-- [ ] Common pattern abstraction
+### 1.3 Cut Implementation
 
-**Documentation:**
-- [ ] README completeness
-- [ ] API documentation
-- [ ] Component documentation
-- [ ] Setup instructions
-- [ ] Deployment guide
-- [ ] Architecture documentation
-- [ ] Code comments quality
+**Requirements:**
+- Mark items as "cut" (visual dimming in UI)
+- Don't delete until paste
+- Same types as copy
+- Keyboard shortcut: Cmd/Ctrl+X
 
-**Testing:**
-- [ ] Unit test coverage
-- [ ] Integration test coverage
-- [ ] E2E test coverage
-- [ ] Testing strategy documentation
-- [ ] CI/CD testing pipeline
+### 1.4 Paste Implementation
 
----
+**Requirements:**
+- **Copy-Paste:** Duplicate items with new IDs
+  - Append " (Copy)" to title
+  - Duplicate attachments in storage
+  - Maintain relationships (if copying folder, copy all children)
+  
+- **Cut-Paste:** Move items
+  - Update `folder_id` or `list_id`
+  - No duplication
+  
+- Handle paste into:
+  - Folders (change `folder_id`)
+  - Lists (add to `items[]` array)
+  - Root level (`folder_id` = NULL)
 
-### 1.5 Deployment & DevOps
+- Keyboard shortcut: Cmd/Ctrl+V
 
-**Build Process:**
-- [ ] Build script optimization
-- [ ] Environment variable management
-- [ ] Build artifact size
-- [ ] Source map generation
-- [ ] Asset optimization
+```typescript
+// Provide implementation for:
 
-**CI/CD Pipeline:**
-- [ ] Automated testing
-- [ ] Linting and type checking
-- [ ] Build automation
-- [ ] Deployment automation
-- [ ] Rollback strategy
+async function pasteItems(
+  targetType: 'folder' | 'list' | 'root',
+  targetId: string | null
+): Promise<void>
 
-**Environment Management:**
-- [ ] Development environment
-- [ ] Staging environment
-- [ ] Production environment
-- [ ] Environment-specific configs
-- [ ] Feature flag system
-
-**Netlify Configuration:**
-- [ ] Build settings optimization
-- [ ] Serverless function setup
-- [ ] Redirect rules
-- [ ] Header configuration
-- [ ] Deploy preview setup
-
-**Database Management:**
-- [ ] Migration system
-- [ ] Seed data for development
-- [ ] Backup strategy
-- [ ] Disaster recovery plan
-- [ ] Schema version control
+async function handleCopyPaste(...): Promise<void>
+async function handleCutPaste(...): Promise<void>
+async function duplicateAttachments(sourceItemId: string, targetItemId: string): Promise<void>
+```
 
 ---
 
-## PART 2: MOBILE PWA READINESS
+## PART 2: BATCH OPERATIONS SYSTEM
 
-### 2.1 PWA Core Features
+### 2.1 Selection Store
 
-**Manifest Configuration:**
-- [ ] Complete manifest.json
-- [ ] App name and short name
-- [ ] Icons (192x192, 512x512, maskable)
-- [ ] Theme color and background color
-- [ ] Display mode (standalone, fullscreen)
-- [ ] Orientation settings
-- [ ] Scope and start_url
-- [ ] Categories and description
-- [ ] Screenshots for app stores
+```typescript
+// Zustand store for multi-select
 
-**Service Worker:**
-- [ ] Service worker registration
-- [ ] Caching strategy (Cache First, Network First, Stale-While-Revalidate)
-- [ ] Offline fallback page
-- [ ] Background sync implementation
-- [ ] Push notification support
-- [ ] Update notification for new versions
-- [ ] Service worker lifecycle management
+interface SelectionStore {
+  selectedIds: Set<string>;
+  selectMode: boolean;
+  lastSelectedId: string | null; // For shift-click range selection
+}
 
-**Installability:**
-- [ ] Add to Home Screen prompt
-- [ ] Install banner timing
-- [ ] Custom install UI
-- [ ] Installation analytics tracking
+export const useSelectionStore = create<SelectionStore>((set) => ({
+  // Provide complete implementation with:
+  toggleSelect(id: string): void
+  selectAll(ids: string[]): void
+  selectRange(startId: string, endId: string, allIds: string[]): void
+  clearSelection(): void
+  enterSelectMode(): void
+  exitSelectMode(): void
+}));
+```
 
-**Offline Functionality:**
-- [ ] Core features work offline
-- [ ] Offline indicator UI
-- [ ] Queue for offline actions
-- [ ] Sync when back online
-- [ ] Conflict resolution UI
+### 2.2 Batch Operations
 
----
+**Implement:**
+- Copy multiple
+- Cut multiple
+- Move to folder (multiple)
+- Move to list (multiple)
+- Delete multiple (move to trash)
+- Archive multiple
+- Tag multiple (add/remove tags)
+- Change color (multiple)
+- Change priority (multiple)
+- Pin/unpin (multiple)
 
-### 2.2 Mobile-First Design
+```typescript
+// Provide complete implementations:
 
-**Responsive Design:**
-- [ ] Mobile breakpoints (320px, 375px, 414px, 768px, 1024px)
-- [ ] Tablet optimization
-- [ ] Desktop optimization
-- [ ] Fluid typography
-- [ ] Flexible layouts
-- [ ] Image responsiveness
+async function batchMoveToFolder(itemIds: string[], folderId: string): Promise<void>
+async function batchMoveToTrash(itemIds: string[]): Promise<void>
+async function batchRestore(itemIds: string[]): Promise<void>
+async function batchPermanentDelete(itemIds: string[]): Promise<void>
+async function batchAddTags(itemIds: string[], tags: string[]): Promise<void>
+async function batchRemoveTags(itemIds: string[], tags: string[]): Promise<void>
+async function batchUpdatePriority(itemIds: string[], priority: string): Promise<void>
+```
 
-**Touch Interactions:**
-- [ ] Touch target size (min 44x44px)
-- [ ] Tap highlight removal
-- [ ] Swipe gestures implementation
-- [ ] Pull-to-refresh
-- [ ] Long-press actions
-- [ ] Touch feedback (haptics if available)
+### 2.3 Batch Operations UI
 
-**Mobile UI/UX:**
-- [ ] Bottom navigation (reachability)
-- [ ] Thumb-friendly placement
-- [ ] Mobile-optimized forms
-- [ ] Virtual keyboard handling
-- [ ] Input field focus management
-- [ ] Scroll position preservation
-- [ ] Loading states and skeletons
-- [ ] Empty states design
+```tsx
+// Provide complete React component:
 
-**Performance on Mobile:**
-- [ ] 3G/4G performance testing
-- [ ] Mobile CPU throttling test
-- [ ] Battery consumption
-- [ ] Data usage optimization
-- [ ] Image lazy loading
-- [ ] Prefetching strategy
+function BatchOperationsBar() {
+  // Show when items are selected
+  // Actions: Copy, Cut, Move, Delete, Archive, Tag, Color, Priority
+  // Show count of selected items
+  // Cancel button to exit select mode
+}
 
-**Mobile-Specific Issues:**
-- [ ] iOS Safari quirks (viewport, 100vh)
-- [ ] Android Chrome quirks
-- [ ] Notch/safe area handling
-- [ ] Status bar styling
-- [ ] Splash screen
-- [ ] Orientation change handling
+// Checkbox component for items
+function SelectableItem({ item, children }) {
+  // Long-press on mobile to enter select mode
+  // Checkbox visible in select mode
+  // Click to toggle selection
+}
+```
 
 ---
 
-### 2.3 Share Functionality
+## PART 3: ADVANCED ITEM OPERATIONS
 
-**Web Share API:**
-- [ ] Share button implementation
-- [ ] Share API browser support check
-- [ ] Fallback for unsupported browsers
-- [ ] Share text content
-- [ ] Share URLs
-- [ ] Share files (notes as PDF/text)
-- [ ] Share images/screenshots
-- [ ] Share to specific apps (WhatsApp, Email, etc.)
+### 3.1 Duplicate Function
 
-**Share Targets:**
-- [ ] Accept shared content from other apps
-- [ ] Share Target API implementation
-- [ ] Handle text shares
-- [ ] Handle URL shares
-- [ ] Handle file shares
-- [ ] Integration with note creation
+```typescript
+// Single item duplication
+async function duplicateNote(noteId: string): Promise<string>
+async function duplicateTask(taskId: string): Promise<string>
+async function duplicateFolder(folderId: string, duplicateChildren: boolean): Promise<string>
 
-**Export Functionality:**
-- [ ] Export notes as Markdown
-- [ ] Export notes as PDF
-- [ ] Export notes as HTML
-- [ ] Export task lists
-- [ ] Export calendar events
-- [ ] Batch export functionality
-- [ ] Import functionality
+// Requirements:
+- Append " (Copy)" to title
+- Generate new IDs
+- Duplicate attachments in storage
+- Maintain internal structure (folder → children)
+- Return new item ID
+```
 
-**Deep Linking:**
-- [ ] URL scheme handling
-- [ ] Universal links (iOS)
-- [ ] App links (Android)
-- [ ] Deep link to specific notes/tasks
-- [ ] Deep link from notifications
+### 3.2 Merge Notes
 
----
+```typescript
+async function mergeNotes(noteIds: string[], strategy: 'concatenate' | 'sections'): Promise<string>
 
-### 2.4 Mobile Features
+// Strategy 'concatenate': Join content with separator
+// Strategy 'sections': Create headings for each note
+// Move original notes to trash (with undo)
+// Combine tags (unique)
+// Use earliest created_at
+// Return merged note ID
+```
 
-**Notifications:**
-- [ ] Push notification implementation
-- [ ] Notification permission request UX
-- [ ] Rich notifications (images, actions)
-- [ ] Notification click handling
-- [ ] Notification grouping
-- [ ] Badge count updates
-- [ ] Silent notifications
-- [ ] Notification preferences
+### 3.3 Split Note
 
-**Biometric Authentication:**
-- [ ] Face ID / Touch ID support
-- [ ] Fingerprint on Android
-- [ ] Fallback to PIN/password
-- [ ] Biometric re-authentication for sensitive actions
+```typescript
+async function splitNote(
+  noteId: string,
+  splitStrategy: 'headers' | 'manual',
+  splitPoints?: number[] // For manual: character positions or block indices
+): Promise<string[]>
 
-**Camera Integration:**
-- [ ] Photo capture for notes
-- [ ] Document scanning
-- [ ] OCR for text extraction
-- [ ] Image compression before upload
+// Strategy 'headers': Split by H1/H2 tags in TipTap content
+// Strategy 'manual': Split at specified positions
+// Create new notes for each section
+// Move original to trash (with undo)
+// Return array of new note IDs
+```
 
-**Location Services:**
-- [ ] Location-based reminders
-- [ ] Location tagging for notes
-- [ ] Permission handling
+### 3.4 Move Operations
 
-**Voice Features:**
-- [ ] Voice notes recording
-- [ ] Speech-to-text for note creation
-- [ ] Voice commands
+```typescript
+// Already have folder_id update, but enhance:
 
-**Gestures:**
-- [ ] Swipe to delete/archive
-- [ ] Pull to refresh
-- [ ] Pinch to zoom
-- [ ] Drag and drop reordering
+async function moveToFolder(itemIds: string[], targetFolderId: string | null): Promise<void>
+async function moveToList(itemIds: string[], listId: string): Promise<void>
+async function moveToTrash(itemIds: string[]): Promise<void>
+async function restoreFromTrash(itemIds: string[]): Promise<void>
+async function permanentDelete(itemIds: string[]): Promise<void>
+
+// Add history tracking for undo
+```
 
 ---
 
-### 2.5 Native-Like Experience
+## PART 4: DRAG AND DROP SYSTEM
 
-**App Shell Architecture:**
-- [ ] Instant loading with app shell
-- [ ] Skeleton screens
-- [ ] Progressive enhancement
-- [ ] Smooth transitions
-- [ ] No flash of unstyled content
+### 4.1 HTML5 Drag and Drop
 
-**Animations:**
-- [ ] Page transition animations
-- [ ] Micro-interactions
-- [ ] Loading animations
-- [ ] Success/error animations
-- [ ] Performance (60fps)
+```typescript
+// Provide complete implementation:
 
-**Native UI Patterns:**
-- [ ] Tab bar navigation
-- [ ] Action sheets
-- [ ] Modal presentations
-- [ ] Toast notifications
-- [ ] Pull-down menus
-- [ ] Context menus
+// Draggable item component
+function DraggableItem({ item, children }) {
+  const handleDragStart = (e: React.DragEvent) => {
+    // Set data transfer
+    // Visual feedback (ghost image)
+  };
+  
+  return (
+    <div draggable onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      {children}
+    </div>
+  );
+}
 
-**Platform-Specific Adaptations:**
-- [ ] iOS design patterns
-- [ ] Android Material Design
-- [ ] Desktop optimizations
-- [ ] Keyboard shortcuts (desktop)
+// Drop target (folder)
+function DroppableFolder({ folder, children }) {
+  const handleDragOver = (e: React.DragEvent) => {
+    // Allow drop
+    // Visual indicator
+  };
+  
+  const handleDrop = async (e: React.DragEvent) => {
+    // Parse dragged item
+    // Move to folder
+  };
+  
+  return (
+    <div onDragOver={handleDragOver} onDrop={handleDrop} onDragLeave={handleDragLeave}>
+      {children}
+    </div>
+  );
+}
 
----
+// Support:
+- Drag notes into folders
+- Drag tasks into lists
+- Drag to reorder (within same container)
+- Multi-drag (if items selected)
+- Mobile: Long-press to drag
+```
 
-## PART 3: FEATURE COMPLETENESS REVIEW
+### 4.2 Mobile Drag (Alternative)
 
-### 3.1 Core Features Audit
+```typescript
+// For better mobile experience, use touch events
 
-**Notes Management:**
-- [ ] Create/Read/Update/Delete notes
-- [ ] Rich text editing (TipTap)
-- [ ] Auto-save functionality
-- [ ] Version history
-- [ ] Note templates
-- [ ] Formatting toolbar
-- [ ] Markdown support
-- [ ] Code blocks with syntax highlighting
-- [ ] Tables
-- [ ] Checklists/Task lists within notes
-- [ ] Attachments (images, files)
-- [ ] Tags/labels
-- [ ] Categories/folders
-- [ ] Search functionality
-- [ ] Sort and filter options
-- [ ] Bulk operations
-- [ ] Archive/unarchive
-- [ ] Trash/restore
-- [ ] Duplicate notes
-- [ ] Pin/star important notes
-
-**Task Management:**
-- [ ] Create/Read/Update/Delete tasks
-- [ ] Task completion toggle
-- [ ] Due dates and reminders
-- [ ] Priority levels
-- [ ] Subtasks
-- [ ] Recurring tasks
-- [ ] Task dependencies
-- [ ] Task lists/projects
-- [ ] Task templates
-- [ ] Task notes/descriptions
-- [ ] Task tags
-- [ ] Task assignment (if collaborative)
-- [ ] Task progress tracking
-- [ ] Calendar view of tasks
-- [ ] Today/upcoming views
-- [ ] Overdue task highlighting
-
-**Google Integration:**
-- [ ] Google Calendar sync
-- [ ] Google Tasks sync
-- [ ] Google Keep sync
-- [ ] OAuth authentication
-- [ ] Bidirectional sync
-- [ ] Conflict resolution
-- [ ] Sync status indicators
-- [ ] Manual sync trigger
-- [ ] Selective sync options
-- [ ] Sync settings
-- [ ] Disconnect/reconnect
-- [ ] Multiple Google accounts
-
-**Search & Discovery:**
-- [ ] Full-text search
-- [ ] Search suggestions
-- [ ] Search filters
-- [ ] Recent searches
-- [ ] Saved searches
-- [ ] Tag-based browsing
-- [ ] Date-based browsing
-- [ ] Related notes suggestions
-
-**Organization:**
-- [ ] Folders/notebooks
-- [ ] Tags system
-- [ ] Favorites/starred
-- [ ] Recently edited
-- [ ] Recently viewed
-- [ ] Custom views
-- [ ] Smart collections
+function useLongPressDrag(item: Item) {
+  // Long-press initiates drag mode
+  // Follow finger
+  // Drop on release
+}
+```
 
 ---
 
-### 3.2 Collaboration Features
+## PART 5: UNDO/REDO SYSTEM
 
-**Sharing & Collaboration:**
-- [ ] Share notes with other users
-- [ ] Share via link (public/private)
-- [ ] Permission levels (view/edit)
-- [ ] Collaborative editing
-- [ ] Real-time cursors
-- [ ] Comments on notes
-- [ ] @mentions
-- [ ] Activity feed
-- [ ] Notification of changes
-- [ ] Conflict resolution UI
+### 5.1 History Store
 
-**Team Features:**
-- [ ] Workspaces
-- [ ] Team notes
-- [ ] Shared task lists
-- [ ] Team calendars
-- [ ] Role-based access control
+```typescript
+interface HistoryEntry {
+  type: 'create' | 'update' | 'delete' | 'move' | 'batch';
+  timestamp: number;
+  itemType: 'note' | 'task' | 'folder' | 'list';
+  itemIds: string[];
+  previousState: any; // Snapshot of data before action
+  action: string; // Description for UI
+  undo: () => Promise<void>; // Function to undo
+  redo: () => Promise<void>; // Function to redo
+}
 
----
+export const useHistoryStore = create<{
+  undoStack: HistoryEntry[];
+  redoStack: HistoryEntry[];
+}>((set, get) => ({
+  undoStack: [],
+  redoStack: [],
+  
+  pushHistory(entry: HistoryEntry): void,
+  undo(): Promise<void>,
+  redo(): Promise<void>,
+  canUndo(): boolean,
+  canRedo(): boolean,
+}));
+```
 
-### 3.3 User Experience Features
+### 5.2 Undoable Operations
 
-**Customization:**
-- [ ] Theme selection (light/dark/auto)
-- [ ] Custom color themes
-- [ ] Font size adjustment
-- [ ] Font family selection
-- [ ] Layout preferences
-- [ ] Default view settings
-- [ ] Shortcut customization
+**Track history for:**
+- Delete items (restore from trash)
+- Move items (restore previous folder)
+- Batch operations
+- Tag changes
+- Priority changes
+- Merge notes (restore originals)
+- Split notes (restore original)
 
-**Accessibility:**
-- [ ] Keyboard navigation
-- [ ] Screen reader support
-- [ ] ARIA labels
-- [ ] Focus management
-- [ ] Color contrast (WCAG AA)
-- [ ] Reduced motion support
-- [ ] Font scaling support
-- [ ] Alternative text for images
+**NOT tracked (handled by TipTap):**
+- Content edits within notes
 
-**User Settings:**
-- [ ] Profile management
-- [ ] Email preferences
-- [ ] Notification preferences
-- [ ] Privacy settings
-- [ ] Data export
-- [ ] Account deletion
-- [ ] Connected apps management
-- [ ] Subscription/billing (if paid)
+### 5.3 Keyboard Shortcuts
 
-**Onboarding:**
-- [ ] Welcome tour
-- [ ] Feature highlights
-- [ ] Tutorial mode
-- [ ] Sample content
-- [ ] Quick start guide
-- [ ] Help documentation
-- [ ] Video tutorials
-- [ ] FAQ section
+```typescript
+// Cmd/Ctrl+Z: Undo
+// Cmd/Ctrl+Shift+Z: Redo
 
----
-
-### 3.4 Advanced Features
-
-**Productivity Features:**
-- [ ] Pomodoro timer
-- [ ] Time tracking
-- [ ] Habit tracking
-- [ ] Goal setting
-- [ ] Daily journal prompts
-- [ ] Weekly review
-- [ ] Templates library
-- [ ] Quick capture widget
-
-**Smart Features:**
-- [ ] AI-powered suggestions
-- [ ] Auto-categorization
-- [ ] Smart reminders
-- [ ] Related content suggestions
-- [ ] Duplicate detection
-- [ ] Auto-tagging
-
-**Analytics & Insights:**
-- [ ] Productivity statistics
-- [ ] Task completion trends
-- [ ] Time spent analysis
-- [ ] Most used tags/categories
-- [ ] Activity heatmap
-- [ ] Goal progress tracking
-
-**Integration & Automation:**
-- [ ] IFTTT support
-- [ ] Zapier integration
-- [ ] Webhooks
-- [ ] API for third-party apps
-- [ ] Email to note
-- [ ] Browser extension
-- [ ] Mobile shortcuts (iOS)
+useEffect(() => {
+  const handleKeyDown = (e: KeyboardEvent) => {
+    const isMod = e.metaKey || e.ctrlKey;
+    
+    if (isMod && e.key === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        historyStore.redo();
+      } else {
+        historyStore.undo();
+      }
+    }
+  };
+  
+  window.addEventListener('keydown', handleKeyDown);
+  return () => window.removeEventListener('keydown', handleKeyDown);
+}, []);
+```
 
 ---
 
-## PART 4: IMPROVEMENT RECOMMENDATIONS
+## PART 6: STORAGE ENHANCEMENTS
 
-Based on your analysis, provide detailed recommendations for:
+### 6.1 Image Compression
 
-### 4.1 Critical Improvements
-What MUST be fixed before production launch?
+```typescript
+import imageCompression from 'browser-image-compression';
 
-### 4.2 High-Priority Enhancements
-What should be added/improved in the next sprint?
+async function compressAndUpload(file: File, itemId: string): Promise<string> {
+  // Compress image if > 1MB
+  const options = {
+    maxSizeMB: 1,
+    maxWidthOrHeight: 1920,
+    useWebWorker: true,
+    fileType: 'image/webp', // Convert to WebP for better compression
+  };
+  
+  const compressedFile = await imageCompression(file, options);
+  
+  // Upload to Supabase Storage
+  const path = `${userId}/${itemId}/${Date.now()}_${file.name}`;
+  const { data, error } = await supabase.storage
+    .from('stash_vault')
+    .upload(path, compressedFile);
+  
+  return data.path;
+}
+```
 
-### 4.3 Feature Suggestions
-What new features would significantly improve the app?
+### 6.2 Thumbnail Generation
 
-### 4.4 Technical Debt
-What technical debt should be addressed?
+```typescript
+async function generateThumbnail(file: File): Promise<Blob> {
+  // Create thumbnail (200x200)
+  const options = {
+    maxSizeMB: 0.1,
+    maxWidthOrHeight: 200,
+    useWebWorker: true,
+  };
+  
+  return await imageCompression(file, options);
+}
+```
 
-### 4.5 Competitive Analysis
-Compare with similar apps (Notion, Evernote, Todoist, Google Keep):
-- What features are they missing that others have?
-- What unique features could differentiate this app?
+### 6.3 File Management
 
-### 4.6 Monetization Opportunities
-If considering a freemium model:
-- What features could be premium?
-- What's the free tier sweet spot?
+```typescript
+// Attachment metadata table
 
-### 4.7 Scalability Roadmap
-Plans for handling growth:
-- 1,000 users
-- 10,000 users
-- 100,000 users
-- 1 million users
+CREATE TABLE attachments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  
+  filename TEXT NOT NULL,
+  original_filename TEXT NOT NULL,
+  file_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  
+  storage_path TEXT NOT NULL,
+  thumbnail_path TEXT,
+  
+  width INTEGER,
+  height INTEGER,
+  
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- RLS policies
+-- Indexes on item_id and user_id
+
+// TypeScript interface
+interface Attachment {
+  id: string;
+  item_id: string;
+  filename: string;
+  original_filename: string;
+  file_type: string;
+  file_size: number;
+  storage_path: string;
+  thumbnail_path: string | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+}
+
+// CRUD functions
+async function uploadAttachment(itemId: string, file: File): Promise<Attachment>
+async function deleteAttachment(attachmentId: string): Promise<void>
+async function getAttachments(itemId: string): Promise<Attachment[]>
+async function duplicateAttachment(attachmentId: string, newItemId: string): Promise<Attachment>
+```
 
 ---
 
-## OUTPUT FORMAT
+## PART 7: VERSION HISTORY
 
-Please structure your response as:
+### 7.1 Version History Table
 
-## 🔴 CRITICAL ISSUES (Production Blockers)
-[Issues that MUST be fixed]
+```sql
+CREATE TABLE item_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  content JSONB NOT NULL,
+  
+  -- Diff from previous version (optional, for efficiency)
+  content_diff JSONB,
+  
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  created_by UUID REFERENCES auth.users(id)
+);
 
-## 🟡 MAJOR CONCERNS (High Priority)
-[Important issues to address soon]
+-- Indexes
+CREATE INDEX idx_item_versions_item ON item_versions(item_id, version DESC);
 
-## 🟢 ENHANCEMENTS (Nice to Have)
-[Improvements for better UX/DX]
+-- RLS
+-- Keep last 50 versions per item (cleanup old versions)
+```
 
-## 💡 NEW FEATURE SUGGESTIONS
-[Innovative features to consider]
+### 7.2 Version Tracking
 
-## 🏗️ ARCHITECTURE RECOMMENDATIONS
-[Structural improvements]
+```typescript
+// Automatic versioning trigger
+CREATE OR REPLACE FUNCTION create_item_version()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only create version if content changed
+  IF (OLD.content IS DISTINCT FROM NEW.content) OR (OLD.title IS DISTINCT FROM NEW.title) THEN
+    INSERT INTO item_versions (item_id, user_id, version, title, content)
+    SELECT 
+      NEW.id,
+      NEW.user_id,
+      COALESCE(MAX(version), 0) + 1,
+      NEW.title,
+      NEW.content
+    FROM item_versions
+    WHERE item_id = NEW.id;
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
-## 📱 MOBILE PWA SPECIFIC
-[Mobile and PWA focused improvements]
+CREATE TRIGGER on_item_update_version
+  AFTER UPDATE ON items
+  FOR EACH ROW
+  EXECUTE FUNCTION create_item_version();
+```
 
-## 🔒 SECURITY HARDENING
-[Security improvements]
+### 7.3 Version UI
 
-## ⚡ PERFORMANCE OPTIMIZATIONS
-[Speed and efficiency improvements]
+```typescript
+// Fetch versions
+async function getVersionHistory(itemId: string): Promise<ItemVersion[]>
 
-## 📊 MONITORING & ANALYTICS
-[Observability improvements]
+// Restore version
+async function restoreVersion(itemId: string, versionId: string): Promise<void>
 
-## 🚀 ROADMAP SUGGESTIONS
-[Phased improvement plan]
+// Compare versions
+async function compareVersions(versionId1: string, versionId2: string): Promise<Diff>
+
+// UI Component
+function VersionHistoryModal({ itemId }) {
+  // Timeline of versions
+  // Preview version
+  // Restore button
+  // Compare mode
+}
+```
+
+---
+
+## PART 8: IMPORT/EXPORT SYSTEM
+
+### 8.1 Export Functions
+
+```typescript
+// Export as JSON (all data, includes relationships)
+async function exportAsJSON(itemIds: string[]): Promise<void>
+
+// Export as Markdown (concatenated notes)
+async function exportAsMarkdown(itemIds: string[]): Promise<void>
+
+// Export as HTML (rich text preserved)
+async function exportAsHTML(itemIds: string[]): Promise<void>
+
+// Export as PDF (using html2pdf or similar)
+async function exportAsPDF(itemIds: string[]): Promise<void>
+
+// Export attachments (zip file with notes + files)
+async function exportWithAttachments(itemIds: string[]): Promise<void>
+
+// Bulk export (entire workspace)
+async function exportWorkspace(): Promise<void>
+```
+
+### 8.2 Import Functions
+
+```typescript
+// Import from JSON (restore from export)
+async function importFromJSON(file: File): Promise<ImportResult>
+
+// Import from Markdown
+async function importFromMarkdown(file: File): Promise<ImportResult>
+
+// Import from Notion (via API or export file)
+async function importFromNotion(file: File): Promise<ImportResult>
+
+// Import from Evernote (ENEX format)
+async function importFromEvernote(file: File): Promise<ImportResult>
+
+// Import from Google Keep (via API)
+async function importFromGoogleKeep(): Promise<ImportResult>
+
+interface ImportResult {
+  success: number;
+  failed: number;
+  errors: string[];
+  importedIds: string[];
+}
+```
+
+---
+
+## PART 9: KEYBOARD SHORTCUTS
+
+### 9.1 Global Shortcuts
+
+```typescript
+const shortcuts = {
+  // Navigation
+  'Cmd/Ctrl+K': 'Quick search / command palette',
+  'Cmd/Ctrl+B': 'Toggle sidebar',
+  'Cmd/Ctrl+\\': 'Toggle folder tree',
+  
+  // Item operations
+  'Cmd/Ctrl+N': 'New note',
+  'Cmd/Ctrl+Shift+N': 'New folder',
+  'Cmd/Ctrl+T': 'New task',
+  
+  // Clipboard
+  'Cmd/Ctrl+C': 'Copy',
+  'Cmd/Ctrl+X': 'Cut',
+  'Cmd/Ctrl+V': 'Paste',
+  'Cmd/Ctrl+D': 'Duplicate',
+  
+  // Undo/Redo
+  'Cmd/Ctrl+Z': 'Undo',
+  'Cmd/Ctrl+Shift+Z': 'Redo',
+  
+  // Selection
+  'Cmd/Ctrl+A': 'Select all',
+  'Escape': 'Clear selection',
+  
+  // Navigation
+  'ArrowUp/Down': 'Navigate items',
+  'Enter': 'Open selected item',
+  'Delete/Backspace': 'Move to trash',
+  'Cmd/Ctrl+Delete': 'Permanent delete',
+  
+  // Editing
+  'Cmd/Ctrl+E': 'Edit mode',
+  'Cmd/Ctrl+S': 'Save (redundant, auto-save)',
+  
+  // View
+  'Cmd/Ctrl+1/2/3': 'Switch views (grid/list/masonry)',
+  'Cmd/Ctrl+F': 'Search in current view',
+  
+  // Tags & filters
+  'Cmd/Ctrl+Shift+T': 'Add tag',
+  'Cmd/Ctrl+Shift+F': 'Toggle filter',
+  
+  // Quick actions
+  'Cmd/Ctrl+P': 'Pin/unpin',
+  'Cmd/Ctrl+Shift+A': 'Archive',
+};
+
+// Implementation with mousetrap or custom hook
+import { useEffect } from 'react';
+
+export function useKeyboardShortcuts() {
+  useEffect(() => {
+    // Register all shortcuts
+    // Handle conflicts (editor vs app-level)
+  }, []);
+}
+```
+
+---
+
+## PART 10: MOBILE GESTURES
+
+### 10.1 Swipe Gestures
+
+```typescript
+// Using react-swipeable or custom touch events
+
+function SwipeableItem({ item, children }) {
+  const [offset, setOffset] = useState(0);
+  
+  const handleSwipeLeft = () => {
+    // Show archive/delete button
+  };
+  
+  const handleSwipeRight = () => {
+    // Show pin/star button
+  };
+  
+  return (
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{ transform: `translateX(${offset}px)` }}
+    >
+      {children}
+      <div className="swipe-actions-left">
+        <button>Pin</button>
+      </div>
+      <div className="swipe-actions-right">
+        <button>Archive</button>
+        <button>Delete</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### 10.2 Long Press
+
+```typescript
+function useLongPress(callback: () => void, ms = 500) {
+  const [startLongPress, setStartLongPress] = useState(false);
+  
+  useEffect(() => {
+    let timerId: NodeJS.Timeout;
+    
+    if (startLongPress) {
+      timerId = setTimeout(callback, ms);
+    }
+    
+    return () => {
+      clearTimeout(timerId);
+    };
+  }, [startLongPress, callback, ms]);
+  
+  return {
+    onTouchStart: () => setStartLongPress(true),
+    onTouchEnd: () => setStartLongPress(false),
+    onTouchMove: () => setStartLongPress(false),
+  };
+}
+
+// Use for:
+- Long-press to enter select mode
+- Long-press to show context menu
+- Long-press to initiate drag
+```
+
+### 10.3 Pull to Refresh
+
+```typescript
+function usePullToRefresh(onRefresh: () => Promise<void>) {
+  // Detect pull-down gesture at top of scroll
+  // Show loading indicator
+  // Call onRefresh
+  // Hide indicator when complete
+}
+```
+
+---
+
+## PART 11: SYNC & CONFLICT RESOLUTION
+
+### 11.1 Optimistic Updates
+
+```typescript
+// TanStack Query with optimistic updates
+
+export function useUpdateItem() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: updateItem,
+    
+    onMutate: async (newItem) => {
+      // Cancel outgoing queries
+      await queryClient.cancelQueries({ queryKey: ['items'] });
+      
+      // Snapshot current data
+      const previousItems = queryClient.getQueryData(['items']);
+      
+      // Optimistically update
+      queryClient.setQueryData(['items'], (old: Item[]) =>
+        old.map(item => item.id === newItem.id ? { ...item, ...newItem } : item)
+      );
+      
+      return { previousItems };
+    },
+    
+    onError: (err, newItem, context) => {
+      // Rollback on error
+      queryClient.setQueryData(['items'], context.previousItems);
+      toast.error('Failed to update. Changes reverted.');
+    },
+    
+    onSettled: () => {
+      // Refetch to ensure consistency
+      queryClient.invalidateQueries({ queryKey: ['items'] });
+    },
+  });
+}
+```
+
+### 11.2 Conflict Detection
+
+```typescript
+// Detect conflicts by comparing updated_at timestamps
+
+interface ConflictInfo {
+  localItem: Item;
+  remoteItem: Item;
+  conflictFields: string[]; // Which fields differ
+}
+
+async function detectConflicts(): Promise<ConflictInfo[]> {
+  // Fetch items from server
+  // Compare with local state (Zustand + IndexedDB for offline)
+  // Identify conflicts
+}
+```
+
+### 11.3 Conflict Resolution UI
+
+```typescript
+function ConflictResolutionModal({ conflicts }: { conflicts: ConflictInfo[] }) {
+  return (
+    <Modal>
+      <h2>{conflicts.length} Conflicts Detected</h2>
+      {conflicts.map(conflict => (
+        <ConflictItem key={conflict.localItem.id} conflict={conflict}>
+          <button onClick={() => resolveConflict('keep-local')}>
+            Keep My Changes
+          </button>
+          <button onClick={() => resolveConflict('keep-remote')}>
+            Use Server Version
+          </button>
+          <button onClick={() => resolveConflict('merge')}>
+            Merge Both
+          </button>
+        </ConflictItem>
+      ))}
+    </Modal>
+  );
+}
+
+// Resolution strategies
+async function resolveConflict(
+  conflict: ConflictInfo,
+  strategy: 'keep-local' | 'keep-remote' | 'merge' | 'manual'
+): Promise<void>
+```
+
+### 11.4 Offline Queue
+
+```typescript
+// Queue failed operations when offline
+
+interface QueuedOperation {
+  id: string;
+  type: 'create' | 'update' | 'delete';
+  itemType: string;
+  data: any;
+  timestamp: number;
+  retries: number;
+}
+
+export const useOfflineQueue = create<{
+  queue: QueuedOperation[];
+}>((set, get) => ({
+  queue: [],
+  
+  addToQueue(operation: QueuedOperation): void,
+  processQueue(): Promise<void>,
+  clearQueue(): void,
+}));
+
+// Auto-process when back online
+useEffect(() => {
+  const handleOnline = () => {
+    offlineQueue.processQueue();
+  };
+  
+  window.addEventListener('online', handleOnline);
+  return () => window.removeEventListener('online', handleOnline);
+}, []);
+```
+
+---
+
+## PART 12: TEMPLATES SYSTEM
+
+### 12.1 Templates Table
+
+```sql
+CREATE TABLE templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT, -- 'note', 'task', 'folder'
+  
+  content JSONB NOT NULL, -- Template content (TipTap JSON)
+  is_public BOOLEAN DEFAULT FALSE, -- Share with community
+  
+  usage_count INTEGER DEFAULT 0,
+  
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- System templates (user_id NULL)
+INSERT INTO templates (user_id, name, category, content, is_public) VALUES
+(NULL, 'Meeting Notes', 'note', '{"type":"doc","content":[...]}', TRUE),
+(NULL, 'Daily Journal', 'note', '{"type":"doc","content":[...]}', TRUE),
+(NULL, 'Project Plan', 'note', '{"type":"doc","content":[...]}', TRUE);
+```
+
+### 12.2 Template Functions
+
+```typescript
+// Create note from template
+async function createFromTemplate(templateId: string): Promise<string>
+
+// Save as template
+async function saveAsTemplate(itemId: string, name: string): Promise<string>
+
+// Browse templates
+async function listTemplates(category?: string): Promise<Template[]>
+
+// Delete template
+async function deleteTemplate(templateId: string): Promise<void>
+```
 
 ---
 
 ## DELIVERABLES
 
-1. **Executive Summary** (2-3 paragraphs)
-2. **Production Readiness Score** (0-100 with breakdown)
-3. **Mobile PWA Score** (0-100 with breakdown)
-4. **Feature Completeness Score** (0-100 with breakdown)
-5. **Detailed Findings** (categorized by severity)
-6. **Actionable Recommendations** (prioritized)
-7. **3-Month Improvement Roadmap**
-8. **Comparison with Industry Standards**
+Please provide complete implementations for:
+
+1. ✅ **Clipboard System** (3 levels)
+2. ✅ **Batch Operations** (store + UI + functions)
+3. ✅ **Advanced Operations** (duplicate, merge, split)
+4. ✅ **Drag and Drop** (desktop + mobile)
+5. ✅ **Undo/Redo** (app-level history)
+6. ✅ **Storage Enhancements** (compression, thumbnails, attachments table)
+7. ✅ **Version History** (table + tracking + UI)
+8. ✅ **Import/Export** (multiple formats)
+9. ✅ **Keyboard Shortcuts** (comprehensive)
+10. ✅ **Mobile Gestures** (swipe, long-press, pull-to-refresh)
+11. ✅ **Conflict Resolution** (detection + UI + strategies)
+12. ✅ **Templates System** (table + functions)
+13. ✅ **Database Optimizations** (additional indexes, functions)
+14. ✅ **TypeScript Types** (all new entities)
+15. ✅ **TanStack Query Hooks** (all CRUD operations)
+16. ✅ **Testing Strategy** (for all operations)
+17. ✅ **Migration Plan** (SQL + data migration)
 
 ---
 
-## YOUR APPROACH
+## SUCCESS CRITERIA
 
-1. **Clone and explore the repository thoroughly**
-2. **Examine every file in the codebase**
-3. **Review all SQL schemas and RLS policies**
-4. **Analyze the component architecture**
-5. **Check configuration files** (.env.example, netlify.toml, package.json)
-6. **Review documentation** (README, MASTER_PLAN, etc.)
-7. **Identify patterns and anti-patterns**
-8. **Compare with best practices**
-9. **Provide specific code examples** for improvements
-10. **Be thorough but constructive**
+The implementation should:
+- ✅ Work seamlessly offline and online
+- ✅ Handle conflicts gracefully
+- ✅ Maintain referential integrity
+- ✅ Perform well with 10,000+ items
+- ✅ Support mobile gestures and touch
+- ✅ Provide rich keyboard navigation
+- ✅ Enable power-user workflows (batch, templates, shortcuts)
+- ✅ Integrate with existing Google sync
+- ✅ Match or exceed Notion/Evernote UX
 
----
+Please begin your comprehensive implementation now, prioritizing the most critical gaps first.
+```
 
-## IMPORTANT NOTES
-
-- **Be brutally honest** but constructive
-- **Provide specific examples** and code snippets
-- **Prioritize issues** by impact and effort
-- **Think like a senior architect** reviewing for enterprise deployment
-- **Consider real-world usage scenarios** (commute, meetings, low connectivity)
-- **Compare with best-in-class apps** (Notion, Linear, Height)
-- **Suggest quick wins** alongside long-term improvements
-- **Consider the indie developer context** (balance perfection with shipping)
-
-Please begin your comprehensive audit now.
+This prompt is now **perfectly tailored** to your actual codebase with all the context from the repository analysis!

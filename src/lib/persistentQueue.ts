@@ -133,9 +133,19 @@ class PersistentQueue {
      * Add an operation to the queue
      */
     add(type: SyncActionType, id: string, payload: any) {
-        // Remove existing operation for this specific ID and type to avoid redundant calls
-        // (e.g., if you update an item twice, we only care about the latest version)
-        this.queue = this.queue.filter(op => !(op.id === id && op.type === type));
+        // INTELLIGENT DEDUPLICATION (The "Resurrection" Fix)
+        // If we are deleting, we must remove ANY pending upsert for this item.
+        // If we are upserting, we remove previous upserts (but a pending delete would be weird, implying undelete).
+        
+        if (type.startsWith('delete-')) {
+            // Remove ALL operations for this ID (both upserts and previous deletes)
+            // This ensures the Delete is the FINAL word.
+            this.queue = this.queue.filter(op => op.id !== id);
+        } else {
+            // Standard dedup: Remove previous op of SAME type
+            // (e.g. 5 fast edits -> only keep last edit)
+            this.queue = this.queue.filter(op => !(op.id === id && op.type === type));
+        }
 
         this.queue.push({
             id,
@@ -356,6 +366,32 @@ class PersistentQueue {
 
     getPendingItems() {
         return this.queue.filter(op => op.type === 'upsert-item').map(op => op.payload);
+    }
+
+    /**
+     * Get IDs of items currently pending deletion
+     */
+    getPendingDeletes(): Set<string> {
+        return new Set(
+            this.queue
+                .filter(op => op.type.startsWith('delete-'))
+                .map(op => op.id)
+        );
+    }
+
+    /**
+     * Clear all pending operations for specific IDs
+     * Used when performing a hard server-side delete to prevent race conditions
+     */
+    clearPendingForItems(ids: string[]) {
+        const idSet = new Set(ids);
+        const originalCount = this.queue.length;
+        this.queue = this.queue.filter(op => !idSet.has(op.id));
+        
+        if (this.queue.length !== originalCount) {
+            console.log(`[Queue] Cleared pending operations for ${originalCount - this.queue.length} items`);
+            this.saveToStorage();
+        }
     }
 }
 

@@ -26,7 +26,7 @@ import { useLocation } from 'wouter';
 import { useAppStore } from '../../store/useAppStore';
 import type { ActiveView, PriorityLevel } from '../../lib/types';
 import { ConfirmationModal } from '../modals/ConfirmationModal';
-import { SettingsModal } from '../modals/SettingsModal';
+
 
 // Priority colors
 const PRIORITY_COLORS: Record<PriorityLevel, string> = {
@@ -57,16 +57,31 @@ function NavItem({ icon, label, count, isActive, isHighlight, onClick, dot, icon
     const handleDragOver = (e: React.DragEvent) => {
         if (isDragTarget) {
             e.preventDefault();
+            e.stopPropagation(); // Stop propagation
+            e.dataTransfer.dropEffect = 'move';
             setIsDragOver(true);
         }
     };
 
-    const handleDragLeave = () => {
+    const handleDragEnter = (e: React.DragEvent) => {
+        if (isDragTarget) {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragOver(true);
+        }
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Only set to false if leaving the element, not entering child
+        // Simplified: just set false.
         setIsDragOver(false);
     };
 
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
+        e.stopPropagation();
         setIsDragOver(false);
         if (onDrop) {
             onDrop(e);
@@ -78,6 +93,7 @@ function NavItem({ icon, label, count, isActive, isHighlight, onClick, dot, icon
             className={`nav-item ${isActive ? 'active' : ''} ${isDragOver ? 'drag-over' : ''} ${className}`}
             onClick={onClick}
             onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onContextMenu={onContextMenu}
@@ -101,11 +117,55 @@ interface FolderItemProps {
     name: string;
     count: number;
     onClick?: () => void;
+    onDrop?: (e: React.DragEvent) => void;
+    isDragTarget?: boolean;
 }
 
-function FolderItem({ type, icon, name, count, onClick }: FolderItemProps) {
+function FolderItem({ type, icon, name, count, onClick, onDrop, isDragTarget }: FolderItemProps) {
+    const [isDragOver, setIsDragOver] = useState(false);
+
+    const handleDragOver = (e: React.DragEvent) => {
+        if (isDragTarget) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            setIsDragOver(true);
+        }
+    };
+
+    const handleDragEnter = (e: React.DragEvent) => {
+        if (isDragTarget) {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragOver(true);
+        }
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+        if (onDrop) {
+            onDrop(e);
+        }
+    };
+
     return (
-        <div className="folder-item" data-type={type} onClick={onClick}>
+        <div 
+            className={`folder-item ${isDragOver ? 'drag-over' : ''}`} 
+            data-type={type} 
+            onClick={onClick}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
             <div className="folder-icon">{icon}</div>
             <span className="folder-name">{name}</span>
             <span className="folder-count">{count}</span>
@@ -361,6 +421,9 @@ export function Sidebar() {
         setDeletingList,
         deleteList,
         toggleSettingsModal,
+        folders, // ADDED
+        moveItems, // ADDED
+        setSelectedFolder, // ADDED
     } = useAppStore();
 
     const [isNewListModalOpen, setIsNewListModalOpen] = useState(false);
@@ -418,6 +481,22 @@ export function Sidebar() {
         closeSidebarOnMobile();
         setLocation(`/list/${listId}`);
     };
+
+    const handleFolderClick = (folderId: string) => {
+        closeSidebarOnMobile();
+        setSelectedFolder(folderId);
+    };
+
+    // Handle dropping items into a folder
+    const handleFolderDrop = useCallback((e: React.DragEvent, folderId: string) => {
+        try {
+            const data = e.dataTransfer.getData('application/json');
+            const itemIds: string[] = data ? JSON.parse(data) : selectedItemIds;
+            moveItems(itemIds, folderId);
+        } catch {
+            moveItems(selectedItemIds, folderId);
+        }
+    }, [selectedItemIds, moveItems]);
 
     // Handle dropping items onto priority
     const handlePriorityDrop = useCallback((e: React.DragEvent, priority: PriorityLevel) => {
@@ -528,7 +607,10 @@ export function Sidebar() {
                             <NavItem
                                 icon={<CalendarDays size={20} />}
                                 label="Scheduled"
-                                count={items.filter(i => i.scheduled_at && !i.deleted_at && !i.is_completed).length}
+                                count={
+                                    items.filter(i => i.scheduled_at && !i.deleted_at && !i.is_completed).length +
+                                    tasks.filter(t => t.scheduled_at && !t.deleted_at && !t.is_completed).length
+                                }
                                 isActive={activeView === 'scheduled'}
                                 onClick={() => handleViewClick('scheduled')}
                             />
@@ -543,7 +625,10 @@ export function Sidebar() {
                             <NavItem
                                 icon={<CheckCircle2 size={20} />}
                                 label="Completed"
-                                count={items.filter(i => i.is_completed && !i.deleted_at).length}
+                                count={
+                                    items.filter(i => i.is_completed && !i.deleted_at).length +
+                                    tasks.filter(t => t.is_completed && !t.deleted_at).length
+                                }
                                 isActive={activeView === 'completed'}
                                 onClick={() => handleViewClick('completed')}
                             />
@@ -600,7 +685,7 @@ export function Sidebar() {
                                 count={priorityCounts.high}
                                 isActive={filters.priority === 'high'}
                                 onClick={() => handlePriorityClick('high')}
-                                isDragTarget
+                                isDragTarget={true}
                                 onDrop={(e) => handlePriorityDrop(e, 'high')}
                             />
                             <NavItem
@@ -610,6 +695,8 @@ export function Sidebar() {
                                 count={priorityCounts.medium}
                                 isActive={filters.priority === 'medium'}
                                 onClick={() => handlePriorityClick('medium')}
+                                isDragTarget={true}
+                                onDrop={(e) => handlePriorityDrop(e, 'medium')}
                             />
                             <NavItem
                                 icon={<Flag size={20} />}
@@ -618,8 +705,33 @@ export function Sidebar() {
                                 count={priorityCounts.low}
                                 isActive={filters.priority === 'low'}
                                 onClick={() => handlePriorityClick('low')}
+                                isDragTarget={true}
+                                onDrop={(e) => handlePriorityDrop(e, 'low')}
                             />
                         </ul>
+                    </nav>
+
+                    {/* Custom Folders Section */}
+                    <nav className="nav-section">
+                        <h3 className="nav-section-title">Folders</h3>
+                        {folders.filter(f => !f.parent_id).map(folder => (
+                            <FolderItem
+                                key={folder.id}
+                                type="folder"
+                                icon={<FolderClosed size={18} />}
+                                name={folder.name}
+                                count={items.filter(i => i.folder_id === folder.id && !i.deleted_at).length}
+                                onClick={() => handleFolderClick(folder.id)}
+                                isDragTarget={true}
+                                onDrop={(e) => handleFolderDrop(e, folder.id)}
+                            />
+                        ))}
+                        <NavItem
+                            icon={<Plus size={16} />}
+                            label="New Folder"
+                            onClick={() => setIsNewFolderModalOpen(true)}
+                            className="add-item"
+                        />
                     </nav>
 
                     {/* Lists Section - with drag targets and New List modal */}
@@ -627,10 +739,10 @@ export function Sidebar() {
                         <h3 className="nav-section-title">Lists</h3>
                         <ul className="nav-list">
                             {lists.map((list) => {
-                                // Count only non-deleted items in the list
+                                // Count only non-deleted and non-archived items in the list
                                 const listCount = list.items.filter(itemId => {
                                     const item = items.find(i => i.id === itemId);
-                                    return item && !item.deleted_at;
+                                    return item && !item.deleted_at && !item.is_archived;
                                 }).length;
 
                                 return (
@@ -794,7 +906,7 @@ export function Sidebar() {
                     isDanger
                 />
 
-                <SettingsModal />
+
 
                 <style>{`
                     .sidebar-overlay {

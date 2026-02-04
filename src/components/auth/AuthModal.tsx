@@ -102,7 +102,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     return (
         <div className="modal-overlay active" onClick={onClose}>
-            <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal" style={{ width: 'min(420px, 90vw)', maxWidth: 420 }} onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="modal-header">
                     <div>

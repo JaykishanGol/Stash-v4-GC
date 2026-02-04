@@ -51,7 +51,8 @@ export function useKeyboardShortcuts() {
             // Cmd/Ctrl + A for Select All
             if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
                 e.preventDefault();
-                selectAll();
+                const items = useAppStore.getState().getFilteredItems();
+                selectAll(items.map(i => i.id));
             }
 
             // Delete / Backspace to trash selected items

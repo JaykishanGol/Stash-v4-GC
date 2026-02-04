@@ -6,11 +6,15 @@ import { createUISlice } from './slices/uiSlice';
 import type { UISlice } from './slices/uiSlice';
 import { createDataSlice } from './slices/dataSlice';
 import type { DataSlice } from './slices/dataSlice';
+import { createSelectionSlice } from './slices/selectionSlice';
+import type { SelectionSlice } from './slices/selectionSlice';
 import type { Item, Task } from '../lib/types';
 import { FOLDERS_ROOT_ID } from '../lib/types';
+import { persistentSyncQueue } from '../lib/persistentQueue';
+import { tombstoneManager } from '../lib/tombstones';
 
 // Define the full application state
-export type AppState = AuthSlice & UISlice & DataSlice & {
+export type AppState = AuthSlice & UISlice & DataSlice & SelectionSlice & {
     // Computed (Selectors)
     getFilteredItems: (overrideListId?: string | null) => Item[];
     getFilteredTasks: () => Task[];
@@ -23,11 +27,38 @@ export const useAppStore = create<AppState>()(
             ...createAuthSlice(set, get, api),
             ...createUISlice(set, get, api),
             ...createDataSlice(set, get, api),
+            ...createSelectionSlice(set, get, api),
 
             // ============ COMPUTED IMPLEMENTATIONS ============
 
             getFilteredItems: (overrideListId?: string | null) => {
                 const state = get();
+
+                // TRASH VIEW SPECIAL HANDLING
+                if (state.activeView === 'trash') {
+                    let filtered = [...state.trashedItems];
+
+                    // Apply Search
+                    if (state.searchQuery) {
+                        const query = state.searchQuery.toLowerCase();
+                        const stripHtml = (html: string): string => html.replace(/<[^>]*>/g, '');
+
+                        filtered = filtered.filter(item => {
+                            if (item.title.toLowerCase().includes(query)) return true;
+                            if (item.type === 'note' && item.content && typeof item.content === 'object') {
+                                const noteContent = item.content as { text?: string };
+                                if (noteContent.text && stripHtml(noteContent.text).toLowerCase().includes(query)) return true;
+                            }
+                            return false;
+                        });
+                    }
+                    
+                    // Sort by deletion time (updated_at)
+                    filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                    
+                    return filtered;
+                }
+
                 // Filter out trashed items by default (they are in trashedItems)
                 let filtered = state.items.filter(item => !item.deleted_at);
 
@@ -65,16 +96,16 @@ export const useAppStore = create<AppState>()(
                 else {
                     switch (state.activeView) {
                         case 'notes':
-                            filtered = filtered.filter(i => i.type === 'note');
+                            filtered = filtered.filter(i => i.type === 'note' && i.folder_id === null);
                             break;
                         case 'links':
-                            filtered = filtered.filter(i => i.type === 'link');
+                            filtered = filtered.filter(i => i.type === 'link' && i.folder_id === null);
                             break;
                         case 'files':
-                            filtered = filtered.filter(i => i.type === 'file');
+                            filtered = filtered.filter(i => i.type === 'file' && i.folder_id === null);
                             break;
                         case 'images':
-                            filtered = filtered.filter(i => i.type === 'image');
+                            filtered = filtered.filter(i => i.type === 'image' && i.folder_id === null);
                             break;
                         case 'folders':
                             // Show: folder items + items moved to folders section root
@@ -193,16 +224,18 @@ export const useAppStore = create<AppState>()(
                         break;
                     }
                     case 'tasks':
-                        // Show all active tasks
-                        break;
                     case 'all':
                         // Show all active tasks
                         break;
+                    case 'trash':
+                    case 'notes':
+                    case 'links':
+                    case 'files':
+                    case 'images':
+                    case 'folders':
+                        // Tasks don't appear in these views
+                        return [];
                     default:
-                        // Hide tasks for type-specific views
-                        if (['notes', 'links', 'files', 'images', 'folders'].includes(state.activeView)) {
-                            return [];
-                        }
                         break;
                 }
 
@@ -281,8 +314,21 @@ export const useAppStore = create<AppState>()(
                         }
                     });
 
-                    const activeItems = mergedItems.filter((i: any) => !i.deleted_at);
-                    const trashedItems = mergedItems.filter((i: any) => i.deleted_at);
+                    // FILTER OUT PENDING DELETES (Critical for preventing resurrection)
+                    // We must trust the local queue over the server state for deletion.
+                    const pendingDeletes = persistentSyncQueue.getPendingDeletes();
+                    const tombstones = new Set(tombstoneManager.getAll());
+                    
+                    const finalItems = mergedItems.filter(i => !pendingDeletes.has(i.id) && !tombstones.has(i.id));
+
+                    // Cleanup: If a tombstone ID is NOT in the server list (allItems), we can remove it from tombstones
+                    // because the server has finally processed the delete.
+                    const serverIdSet = new Set(allItems.map(i => i.id));
+                    // We pass the IDs that DO exist on server to prune. Logic: Keep T if T in Server.
+                    tombstoneManager.prune(Array.from(serverIdSet));
+
+                    const activeItems = finalItems.filter((i: any) => !i.deleted_at);
+                    const trashedItems = finalItems.filter((i: any) => i.deleted_at);
 
                     // Ensure task fields are initialized
                     const sanitizedTasks = (tasksData || []).map((t: any) => ({

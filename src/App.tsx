@@ -6,6 +6,7 @@ import { SchedulerModal } from './components/modals/SchedulerModal';
 import { InfoPanel } from './components/modals/InfoPanel';
 import { FilePreviewModal } from './components/modals/FilePreviewModal';
 import { AuthModal } from './components/auth/AuthModal';
+import { SettingsModal } from './components/modals/SettingsModal';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { ToastListener } from './components/ui/ToastListener';
 import { BulkActionsBar } from './components/ui/BulkActionsBar';
@@ -36,7 +37,7 @@ function App() {
     isHeaderVisible,
     isQuickAddOpen,
     fetchNotifications,
-    setPendingShareItem,
+    setPendingShareItems,
     addNotification // Import for debug toast
   } = useAppStore();
 
@@ -73,10 +74,10 @@ function App() {
           // but we have the data in memory now 'share' variable
           await clearPendingShares();
 
-          const newItem = processShare(share, user?.id || 'demo');
-          if (newItem) {
-            console.log('Share processed into item:', newItem);
-            setPendingShareItem(newItem);
+          const newItems = processShare(share, user?.id || 'demo');
+          if (newItems && newItems.length > 0) {
+            console.log('Share processed into items:', newItems);
+            setPendingShareItems(newItems);
           } else {
             console.error('Failed to process share data');
             addNotification('error', 'Import Failed', 'Could not process shared content');
@@ -87,7 +88,7 @@ function App() {
       url.searchParams.delete('share_target');
       window.history.replaceState({}, '', url.toString());
     }
-  }, [user, setPendingShareItem, addNotification]);
+  }, [user, setPendingShareItems, addNotification]);
 
   // Auto-close sidebar on mobile
   useEffect(() => {
@@ -155,6 +156,7 @@ function App() {
             onClose={closeAuthModal}
             onSuccess={loadUserData}
           />
+          <SettingsModal />
         </ToastProvider>
       </Router>
     </AppErrorBoundary>

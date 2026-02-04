@@ -77,6 +77,31 @@
     --transition-slow: 0.35s ease;
 }
 
+/* Drag and Drop Visuals */
+.nav-item.drag-over,
+.folder-item.drag-over {
+    background: var(--accent-light);
+    border: 1px dashed var(--accent);
+    color: var(--accent);
+}
+
+/* Card Selection Checkbox Logic */
+.item-card-wrapper:hover .selection-checkbox,
+.item-card-wrapper.selection-mode .selection-checkbox,
+.selection-checkbox.checked {
+    opacity: 1 !important;
+}
+
+/* Card Selection Mode Visuals */
+.item-card-wrapper.selection-mode {
+    cursor: default;
+}
+
+.item-card-wrapper.selected .card {
+    border: 2px solid var(--primary);
+    transform: scale(0.98);
+}
+
 /* Reset & Base */
 *,
 *::before,

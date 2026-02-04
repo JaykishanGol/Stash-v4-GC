@@ -16,6 +16,7 @@ interface QueueItem {
 
 const MAX_RETRIES = 3;
 const DEBOUNCE_MS = 2000; // Wait 2s before syncing to allow typing to finish
+const STORAGE_KEY = 'stash_google_sync_queue';
 
 export class GoogleSyncQueue {
     private queue: Map<string, QueueItem> = new Map();
@@ -25,11 +26,47 @@ export class GoogleSyncQueue {
     // Singleton instance
     private static instance: GoogleSyncQueue;
 
+    private constructor() {
+        this.loadFromStorage();
+        // Auto-resume queue processing when online
+        if (typeof window !== 'undefined') {
+            window.addEventListener('online', () => {
+                console.log('[GoogleSyncQueue] Back online. Resuming...');
+                this.processQueue();
+            });
+        }
+    }
+
     public static getInstance(): GoogleSyncQueue {
         if (!GoogleSyncQueue.instance) {
             GoogleSyncQueue.instance = new GoogleSyncQueue();
         }
         return GoogleSyncQueue.instance;
+    }
+
+    private saveToStorage() {
+        try {
+            const serializable = Array.from(this.queue.entries());
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+        } catch (e) {
+            console.warn('[GoogleSyncQueue] Failed to save queue:', e);
+        }
+    }
+
+    private loadFromStorage() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                const entries: [string, QueueItem][] = JSON.parse(saved);
+                this.queue = new Map(entries);
+                console.log(`[GoogleSyncQueue] Restored ${this.queue.size} pending jobs.`);
+                
+                // Restart processing for all restored items immediately (no debounce needed for restored items)
+                this.processQueue();
+            }
+        } catch (e) {
+            console.error('[GoogleSyncQueue] Failed to load queue:', e);
+        }
     }
 
     /**
@@ -55,16 +92,26 @@ export class GoogleSyncQueue {
             timestamp: Date.now(),
             retries: this.queue.get(id)?.retries || 0
         });
+        
+        this.saveToStorage();
 
-        // 3. Mark as "Syncing" in UI (Optimistic)
-        // We could dispatch a state update here if we had a specific 'is_google_syncing' flag
-
-        // 4. Set new timer
+        // 3. Set new timer
         const timer = setTimeout(() => {
             this.processItem(id);
         }, DEBOUNCE_MS);
 
         this.debounceTimers.set(id, timer);
+    }
+
+    /**
+     * Process all items in the queue (e.g., on load or reconnect)
+     */
+    private async processQueue() {
+        for (const id of this.queue.keys()) {
+            if (!this.processing.has(id) && !this.debounceTimers.has(id)) {
+                this.processItem(id);
+            }
+        }
     }
 
     /**
@@ -92,14 +139,17 @@ export class GoogleSyncQueue {
 
             // Success!
             this.queue.delete(id);
+            this.saveToStorage();
             this.updateErrorStatus(id, null); // Clear error
 
         } catch (error: any) {
             console.error(`[GoogleSyncQueue] Failed to sync ${id}:`, error);
 
             if (item.retries < MAX_RETRIES) {
-                // Retry with exponential backoff (not implemented in debounce, just simple re-queue)
+                // Retry with exponential backoff
                 item.retries++;
+                this.saveToStorage(); // Save retry count
+                
                 console.log(`[GoogleSyncQueue] Retrying ${id} (Attempt ${item.retries})`);
                 
                 // Re-queue with delay
@@ -111,6 +161,7 @@ export class GoogleSyncQueue {
             } else {
                 // Give up
                 this.queue.delete(id);
+                this.saveToStorage();
                 this.updateErrorStatus(id, error.message || 'Sync failed');
                 
                 // Notify user

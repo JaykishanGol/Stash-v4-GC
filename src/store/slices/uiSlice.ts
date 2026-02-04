@@ -71,10 +71,7 @@ export interface UISlice {
     previewingItem: Item | null;
 
     // Share Interceptor State
-    pendingShareItem: Item | null;
-
-    // Selection State
-    selectedItemIds: string[];
+    pendingShareItems: Item[];
 
     // Clipboard State
     clipboard: ClipboardState;
@@ -126,13 +123,7 @@ export interface UISlice {
     setPreviewingItem: (item: Item | null) => void;
 
     // Share Interceptor Actions
-    setPendingShareItem: (item: Item | null) => void;
-
-    // Selection Actions
-    selectItem: (id: string, multi?: boolean) => void;
-    selectAll: () => void; // Requires access to items, might need to be in main store or receive items
-    clearSelection: () => void;
-    isSelected: (id: string) => boolean;
+    setPendingShareItems: (items: Item[]) => void;
 
     // Clipboard Actions
     setClipboard: (clipboard: ClipboardState) => void;
@@ -152,7 +143,7 @@ export interface UISlice {
     markAllNotificationsRead: () => Promise<void>;
 }
 
-export const createUISlice: StateCreator<UISlice> = (set, get) => ({
+export const createUISlice: StateCreator<UISlice> = (set) => ({
     isSidebarOpen: true,
     viewMode: 'grid',
     activeView: 'home',
@@ -174,9 +165,8 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
     contextMenu: { isOpen: false, x: 0, y: 0, itemId: null, type: null },
     infoPanelItem: null,
     previewingItem: null,
-    pendingShareItem: null, // Initial State
+    pendingShareItems: [], // Initial State
 
-    selectedItemIds: [],
     clipboard: { items: [], operation: null },
     searchQuery: '',
     filters: { type: null, priority: null },
@@ -232,25 +222,7 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
     closeInfoPanel: () => set({ infoPanelItem: null }),
 
     setPreviewingItem: (item) => set({ previewingItem: item }),
-    setPendingShareItem: (item: Item | null) => set({ pendingShareItem: item }),
-
-    selectItem: (id, multi = false) => set((state) => {
-        if (multi) {
-            const isSelected = state.selectedItemIds.includes(id);
-            return {
-                selectedItemIds: isSelected
-                    ? state.selectedItemIds.filter(i => i !== id)
-                    : [...state.selectedItemIds, id]
-            };
-        }
-        return { selectedItemIds: [id] };
-    }),
-
-    // Placeholder for selectAll (needs items)
-    selectAll: () => { },
-
-    clearSelection: () => set({ selectedItemIds: [] }),
-    isSelected: (id) => get().selectedItemIds.includes(id),
+    setPendingShareItems: (items) => set({ pendingShareItems: items }),
 
     setClipboard: (clipboard) => set({ clipboard }),
     clearClipboard: () => set({ clipboard: { items: [], operation: null } }),
@@ -279,21 +251,39 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
         }
     },
 
-    addNotification: (type, title, message) => set((state) => ({
-        // This is for LOCAL-ONLY temporary alerts (like "Copied to clipboard")
-        // We don't save these to DB to avoid spamming history
-        notifications: [
-            {
-                id: generateId(),
-                type,
-                title,
-                message,
-                timestamp: new Date().toISOString(),
-                read: false
-            },
-            ...state.notifications
-        ]
-    })),
+    addNotification: async (type, title, message) => {
+        const notification = {
+            id: generateId(),
+            type,
+            title,
+            message,
+            timestamp: new Date().toISOString(),
+            read: false
+        };
+
+        // 1. Optimistic Update
+        set((state) => ({
+            notifications: [notification, ...state.notifications]
+        }));
+
+        // 2. Persist to DB (if authenticated)
+        const { user } = (get() as any); // Access auth slice
+        if (user && user.id !== 'demo') {
+            try {
+                await supabase.from('notifications').insert({
+                    id: notification.id,
+                    user_id: user.id,
+                    type: notification.type,
+                    title: notification.title,
+                    message: notification.message,
+                    is_read: false,
+                    created_at: notification.timestamp
+                });
+            } catch (err) {
+                console.error('[UI] Failed to persist notification', err);
+            }
+        }
+    },
 
     markNotificationRead: async (id) => {
         set((state) => ({

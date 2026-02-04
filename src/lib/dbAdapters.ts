@@ -72,6 +72,10 @@ export function adaptItemRow(row: ItemRow): Item {
         created_at: row.created_at ?? new Date().toISOString(),
         updated_at: row.updated_at ?? new Date().toISOString(),
         deleted_at: row.deleted_at ?? null,
+        
+        // Search
+        // @ts-ignore - search_text is not in types.ts Item yet but is in DB
+        search_text: (row as any).search_text ?? null,
     };
 }
 

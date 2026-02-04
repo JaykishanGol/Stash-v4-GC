@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Check, Folder, Palette, AlertCircle, List as ListIcon, Calendar } from 'lucide-react';
+import { X, Check, Folder, Palette, AlertCircle, List as ListIcon, Calendar, Image as ImageIcon, FileText } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { supabase } from '../../lib/supabase'; // Import supabase
 import type { Item, PriorityLevel, CardColor } from '../../lib/types';
@@ -8,8 +8,8 @@ import { SchedulerContent } from './SchedulerModal';
 
 export function ShareIntentModal() {
     const {
-        pendingShareItem,
-        setPendingShareItem,
+        pendingShareItems,
+        setPendingShareItems,
         addItem,
         folders,
         lists
@@ -26,8 +26,8 @@ export function ShareIntentModal() {
     const [scheduleUpdates, setScheduleUpdates] = useState<Partial<Item>>({});
 
     useEffect(() => {
-        if (pendingShareItem) {
-            // Reset state when new item arrives
+        if (pendingShareItems.length > 0) {
+            // Reset state when new items arrive
             setSelectedFolderId(null);
             setSelectedListId(null);
             setSelectedPriority('none');
@@ -36,103 +36,124 @@ export function ShareIntentModal() {
             setShowScheduler(false);
             setIsSaving(false);
         }
-    }, [pendingShareItem]);
+    }, [pendingShareItems]);
 
-    if (!pendingShareItem) return null;
+    if (pendingShareItems.length === 0) return null;
 
     const handleSave = async (withTriage: boolean) => {
         setIsSaving(true);
 
-        const finalItem: Item = {
-            ...pendingShareItem,
-            folder_id: withTriage ? selectedFolderId : null,
-            priority: withTriage ? selectedPriority : 'none',
-            bg_color: withTriage ? CARD_COLORS[selectedColor] : CARD_COLORS.default,
+        for (const item of pendingShareItems) {
+            const finalItem: Item = {
+                ...item,
+                folder_id: withTriage ? selectedFolderId : null,
+                priority: withTriage ? selectedPriority : 'none',
+                bg_color: withTriage ? CARD_COLORS[selectedColor] : CARD_COLORS.default,
 
-            // Merge scheduling data if Triage was used, otherwise defaults
-            ...(withTriage ? scheduleUpdates : {}),
+                // Merge scheduling data if Triage was used, otherwise defaults
+                ...(withTriage ? scheduleUpdates : {}),
 
-            // Ensure defaults if not set by scheduler
-            scheduled_at: (withTriage && scheduleUpdates.scheduled_at) || null,
-            remind_before: (withTriage && scheduleUpdates.remind_before) || null,
-            recurring_config: (withTriage && scheduleUpdates.recurring_config) || null,
-        };
+                // Ensure defaults if not set by scheduler
+                scheduled_at: (withTriage && scheduleUpdates.scheduled_at) || null,
+                remind_before: (withTriage && scheduleUpdates.remind_before) || null,
+                recurring_config: (withTriage && scheduleUpdates.recurring_config) || null,
+            };
 
-        // --- SUPABASE STORAGE UPLOAD ---
-        if ((finalItem.type === 'file' || finalItem.type === 'image') && finalItem.file_meta?.path.startsWith('blob:')) {
-            try {
-                // 1. Fetch the blob from the local URL
-                const response = await fetch(finalItem.file_meta.path);
-                const blob = await response.blob();
+            // --- SUPABASE STORAGE UPLOAD ---
+            if ((finalItem.type === 'file' || finalItem.type === 'image') && finalItem.file_meta?.path.startsWith('blob:')) {
+                try {
+                    // 1. Fetch the blob from the local URL
+                    const response = await fetch(finalItem.file_meta.path);
+                    const blob = await response.blob();
 
-                // 2. Upload to 'stash_uploads' bucket
-                // Path format: user_id/timestamp_filename
-                const userId = finalItem.user_id;
-                const timestamp = Date.now();
-                const sanitizedName = finalItem.file_meta.originalName?.replace(/[^a-zA-Z0-9.-]/g, '_') || 'file';
-                const filePath = `${userId}/${timestamp}_${sanitizedName}`;
+                    // 2. Upload to 'stash_uploads' bucket
+                    const userId = finalItem.user_id;
+                    const timestamp = Date.now();
+                    // Add random string to avoid collision in batch
+                    const random = Math.random().toString(36).substring(7);
+                    const sanitizedName = finalItem.file_meta.originalName?.replace(/[^a-zA-Z0-9.-]/g, '_') || 'file';
+                    const filePath = `${userId}/${timestamp}_${random}_${sanitizedName}`;
 
-                const { data: _data, error } = await supabase
-                    .storage
-                    .from('stash_uploads')
-                    .upload(filePath, blob, {
-                        cacheControl: '3600',
-                        upsert: false
-                    });
+                    const { data: _data, error } = await supabase
+                        .storage
+                        .from('stash_uploads')
+                        .upload(filePath, blob, {
+                            cacheControl: '3600',
+                            upsert: false
+                        });
 
-                if (error) throw error;
+                    if (error) throw error;
 
-                // 3. Get Public URL
-                const { data: urlData } = supabase
-                    .storage
-                    .from('stash_uploads')
-                    .getPublicUrl(filePath);
+                    // 3. Get Public URL
+                    const { data: urlData } = supabase
+                        .storage
+                        .from('stash_uploads')
+                        .getPublicUrl(filePath);
 
-                // 4. Update item with remote URL
-                if (finalItem.file_meta) {
-                    finalItem.file_meta.path = urlData.publicUrl;
+                    // 4. Update item with remote URL
+                    if (finalItem.file_meta) {
+                        finalItem.file_meta.path = urlData.publicUrl;
+                    }
+
+                    // (Optional) Revoke the local blob URL
+                    URL.revokeObjectURL(item.file_meta!.path);
+
+                } catch (e) {
+                    console.error("Failed to upload file:", e);
+                    // Continue to save item with blob URL (will be broken next reload but better than data loss?)
+                    // Or maybe we should skip adding it?
+                    // Let's add it so user can retry or see it failed.
                 }
+            }
 
-                // (Optional) Revoke the local blob URL to free memory
-                URL.revokeObjectURL(pendingShareItem.file_meta!.path);
+            addItem(finalItem);
 
-            } catch (e) {
-                console.error("Failed to upload file:", e);
-                alert("Upload failed. Saving offline version (might not sync).");
-                // Fallback: Leave as blob (will fail sync) or try base64 as backup? 
-                // For now, we alert.
+            if (withTriage && selectedListId) {
+                const { addItemsToList } = useAppStore.getState();
+                addItemsToList(selectedListId, [finalItem.id]);
             }
         }
 
-        addItem(finalItem);
-
-        if (withTriage && selectedListId) {
-            const { addItemsToList } = useAppStore.getState();
-            addItemsToList(selectedListId, [finalItem.id]);
-        }
-
-        setPendingShareItem(null);
+        setPendingShareItems([]);
         setIsSaving(false);
     };
 
     const getPreviewContent = () => {
-        if (pendingShareItem.type === 'image' && pendingShareItem.file_meta?.path) {
+        if (pendingShareItems.length > 1) {
             return (
-                <div className="preview-image-box">
-                    <img src={pendingShareItem.file_meta.path} alt="Shared" />
+                <div className="preview-file-box">
+                    <span className="file-name" style={{ fontSize: '1.2rem' }}>{pendingShareItems.length} Items</span>
+                    <span className="file-meta">Batch Import</span>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+                        {pendingShareItems.slice(0, 3).map((i, idx) => (
+                            <div key={idx} style={{ width: 40, height: 40, background: '#E5E7EB', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {i.type === 'image' ? <ImageIcon size={20} /> : <FileText size={20} />}
+                            </div>
+                        ))}
+                        {pendingShareItems.length > 3 && <div style={{ display: 'flex', alignItems: 'center', color: '#6B7280' }}>+{pendingShareItems.length - 3}</div>}
+                    </div>
                 </div>
             );
         }
-        if (pendingShareItem.type === 'link') {
-            const url = (pendingShareItem.content as any).url;
+
+        const item = pendingShareItems[0];
+        if (item.type === 'image' && item.file_meta?.path) {
+            return (
+                <div className="preview-image-box">
+                    <img src={item.file_meta.path} alt="Shared" />
+                </div>
+            );
+        }
+        if (item.type === 'link') {
+            const url = (item.content as any).url;
             return (
                 <div className="preview-link-box">
                     <span className="link-url">{url}</span>
                 </div>
             );
         }
-        if (pendingShareItem.type === 'note') {
-            const text = (pendingShareItem.content as any).text;
+        if (item.type === 'note') {
+            const text = (item.content as any).text;
             return (
                 <div className="preview-note-box">
                     <p>{text?.substring(0, 150)}{text?.length > 150 ? '...' : ''}</p>
@@ -141,8 +162,8 @@ export function ShareIntentModal() {
         }
         return (
             <div className="preview-file-box">
-                <span className="file-name">{pendingShareItem.title}</span>
-                <span className="file-meta">{pendingShareItem.file_meta?.mime}</span>
+                <span className="file-name">{item.title}</span>
+                <span className="file-meta">{item.file_meta?.mime}</span>
             </div>
         );
     };
@@ -155,6 +176,9 @@ export function ShareIntentModal() {
         return 'Schedule';
     };
 
+    const firstItemTitle = pendingShareItems[0]?.title || 'New Item';
+    const displayTitle = pendingShareItems.length > 1 ? `${pendingShareItems.length} Items` : firstItemTitle;
+
     return (
         <div className="share-modal-overlay">
             {/* Scheduler Overlay */}
@@ -163,7 +187,7 @@ export function ShareIntentModal() {
                     <div onClick={e => e.stopPropagation()}>
                         <SchedulerContent
                             item={{
-                                title: pendingShareItem.title || 'New Item',
+                                title: displayTitle,
                                 ...scheduleUpdates
                             }}
                             isTaskType={false}

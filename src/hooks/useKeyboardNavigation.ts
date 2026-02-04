@@ -1,5 +1,6 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
+import { useFilteredItems } from './useFilteredItems';
 
 /**
  * Premium keyboard navigation hook
@@ -8,75 +9,123 @@ import { useAppStore } from '../store/useAppStore';
 export function useKeyboardNavigation() {
     const {
         selectedItemIds,
-        items,
+        selectItem,
         setPreviewingItem,
         setEditingItem,
         setSelectedFolder,
         moveItemsToTrash,
         clearSelection,
+        activeView
     } = useAppStore();
 
-    const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        // Don't trigger if user is typing in an input
-        if (
-            e.target instanceof HTMLInputElement ||
-            e.target instanceof HTMLTextAreaElement ||
-            (e.target as HTMLElement).isContentEditable
-        ) {
-            return;
-        }
+    // Use memoized visual list for correct spatial navigation
+    const { items: visibleItems } = useFilteredItems();
+    const [focusedIndex, setFocusedIndex] = useState<number>(-1);
 
-        // Get currently selected item (first if multiple)
-        const selectedId = selectedItemIds[0];
-        const selectedItem = selectedId ? items.find((i: any) => i.id === selectedId) : null;
-
-        // Enter - Open selected item
-        if (e.key === 'Enter' && selectedItem && !e.metaKey && !e.ctrlKey) {
-            e.preventDefault();
-
-            if (selectedItem.type === 'folder') {
-                setSelectedFolder(selectedItem.id);
-            } else if (selectedItem.type === 'image' || selectedItem.type === 'file') {
-                setPreviewingItem(selectedItem);
-            } else if (selectedItem.type === 'link') {
-                const content = selectedItem.content as { url?: string };
-                if (content.url) {
-                    window.open(content.url, '_blank');
-                }
-            } else {
-                setEditingItem(selectedItem);
-            }
-            return;
-        }
-
-        // Delete or Backspace - Move to trash
-        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedItemIds.length > 0) {
-            e.preventDefault();
-            moveItemsToTrash(selectedItemIds);
-            clearSelection();
-            return;
-        }
-
-        // Escape - Clear selection
-        if (e.key === 'Escape') {
-            clearSelection();
-            return;
-        }
-
-        // Cmd/Ctrl + A - Select all (handled elsewhere, but let's support it)
-        if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
-            // This could select all visible items
-            // For now, just prevent default if we have items selected
-            if (selectedItemIds.length > 0) {
-                e.preventDefault();
-            }
-        }
-    }, [selectedItemIds, items, setPreviewingItem, setEditingItem, setSelectedFolder, moveItemsToTrash, clearSelection]);
+    // Reset focus when view or content changes drastically
+    useEffect(() => {
+        setFocusedIndex(-1);
+    }, [activeView, visibleItems.length]);
 
     useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Don't trigger if user is typing in an input
+            if (
+                e.target instanceof HTMLInputElement ||
+                e.target instanceof HTMLTextAreaElement ||
+                (e.target as HTMLElement).isContentEditable
+            ) {
+                return;
+            }
+
+            const COLS = 4; // Approx grid columns
+            const TOTAL = visibleItems.length;
+
+            if (TOTAL === 0) return;
+
+            const moveFocus = (newIndex: number) => {
+                if (newIndex < 0 || newIndex >= TOTAL) return;
+                e.preventDefault();
+                setFocusedIndex(newIndex);
+                
+                const item = visibleItems[newIndex];
+                selectItem(item.id, e.metaKey || e.ctrlKey, e.shiftKey);
+                
+                // Try to scroll into view (best effort)
+                const element = document.querySelector(`[aria-label*="${item.title}"]`);
+                element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            };
+
+            // Initial Focus logic
+            if (focusedIndex === -1 && selectedItemIds.length > 0) {
+                const idx = visibleItems.findIndex(i => i.id === selectedItemIds[0]);
+                if (idx !== -1) setFocusedIndex(idx);
+            }
+
+            switch (e.key) {
+                case 'ArrowRight':
+                    moveFocus(focusedIndex + 1);
+                    break;
+                case 'ArrowLeft':
+                    moveFocus(focusedIndex - 1);
+                    break;
+                case 'ArrowDown':
+                    moveFocus(focusedIndex + COLS);
+                    break;
+                case 'ArrowUp':
+                    moveFocus(focusedIndex - COLS);
+                    break;
+                
+                case 'Enter': {
+                    e.preventDefault();
+                    const targetIndex = focusedIndex !== -1 ? focusedIndex : 
+                        (selectedItemIds.length > 0 ? visibleItems.findIndex(i => i.id === selectedItemIds[0]) : -1);
+
+                    if (targetIndex !== -1) {
+                        const selectedItem = visibleItems[targetIndex];
+                        if (selectedItem.type === 'folder') {
+                            setSelectedFolder(selectedItem.id);
+                        } else if (selectedItem.type === 'image' || selectedItem.type === 'file') {
+                            setPreviewingItem(selectedItem);
+                        } else if (selectedItem.type === 'link') {
+                            const content = selectedItem.content as { url?: string };
+                            if (content.url) window.open(content.url, '_blank');
+                        } else {
+                            setEditingItem(selectedItem);
+                        }
+                    }
+                    break;
+                }
+
+                case ' ': { // Spacebar -> Quick Look
+                    e.preventDefault();
+                    if (focusedIndex !== -1) {
+                        const item = visibleItems[focusedIndex];
+                        if (item.type === 'image' || item.type === 'file') setPreviewingItem(item);
+                    }
+                    break;
+                }
+
+                case 'Delete':
+                case 'Backspace': {
+                    if (selectedItemIds.length > 0) {
+                        e.preventDefault();
+                        moveItemsToTrash(selectedItemIds);
+                        clearSelection();
+                    }
+                    break;
+                }
+
+                case 'Escape':
+                    clearSelection();
+                    setFocusedIndex(-1);
+                    break;
+            }
+        };
+
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleKeyDown]);
+    }, [selectedItemIds, visibleItems, focusedIndex, selectItem, setPreviewingItem, setEditingItem, setSelectedFolder, moveItemsToTrash, clearSelection]);
 }
 
 /**

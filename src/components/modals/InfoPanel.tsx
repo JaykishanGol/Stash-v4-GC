@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     X,
     Calendar,
@@ -12,12 +12,16 @@ import {
     Image,
     FolderClosed,
     Pin,
-    Trash2
+    Trash2,
+    RotateCcw,
+    History
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { NoteContent, LinkContent, FileMeta, FolderContent, CardColor, PriorityLevel } from '../../lib/types';
 import { CARD_COLORS } from '../../lib/types';
 import { formatFileSize, formatDate, formatTime } from '../../lib/utils';
+import { getItemVersions, restoreVersion } from '../../lib/versionService';
+import type { ItemVersion } from '../../lib/versionTypes';
 
 const TYPE_ICONS = {
     note: StickyNote,
@@ -40,6 +44,11 @@ export function InfoPanel() {
     const [title, setTitle] = useState(infoPanelItem?.title || '');
     const [isEditing, setIsEditing] = useState(false);
     const [lastItemId, setLastItemId] = useState<string | null>(null);
+    
+    // History State
+    const [activeTab, setActiveTab] = useState<'details' | 'history'>('details');
+    const [versions, setVersions] = useState<ItemVersion[]>([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
     // Sync title when the ITEM CHANGES (Render-time update)
     const currentId = infoPanelItem?.id ?? null;
@@ -48,8 +57,20 @@ export function InfoPanel() {
         if (infoPanelItem) {
             setTitle(infoPanelItem.title);
             setIsEditing(false);
+            setActiveTab('details'); // Reset tab
+            setVersions([]); // Clear history
         }
     }
+
+    // Fetch history when tab changes
+    useEffect(() => {
+        if (activeTab === 'history' && infoPanelItem) {
+            setIsLoadingHistory(true);
+            getItemVersions(infoPanelItem.id)
+                .then(setVersions)
+                .finally(() => setIsLoadingHistory(false));
+        }
+    }, [activeTab, infoPanelItem]);
 
     if (!infoPanelItem) return null;
 
@@ -79,6 +100,23 @@ export function InfoPanel() {
 
     const handleTogglePin = () => {
         toggleItemPin(item.id);
+    };
+
+    const handleRestore = async (version: ItemVersion) => {
+        if (confirm(`Restore version from ${formatDate(version.created_at)}? Current changes will be overwritten.`)) {
+            try {
+                await restoreVersion(version);
+                // Update local store immediately for responsiveness (optional, but good)
+                updateItem(item.id, { 
+                    title: version.title, 
+                    content: version.content 
+                });
+                alert('Version restored!');
+                setActiveTab('details');
+            } catch (e) {
+                alert('Failed to restore version.');
+            }
+        }
     };
 
     // Get content-specific info
@@ -122,7 +160,20 @@ export function InfoPanel() {
             <div className="info-panel">
                 {/* Header */}
                 <div className="info-panel-header">
-                    <h2 className="info-panel-title">Info</h2>
+                    <div className="info-tabs">
+                        <button 
+                            className={`info-tab ${activeTab === 'details' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('details')}
+                        >
+                            Details
+                        </button>
+                        <button 
+                            className={`info-tab ${activeTab === 'history' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('history')}
+                        >
+                            History
+                        </button>
+                    </div>
                     <button className="info-panel-close" onClick={closeInfoPanel}>
                         <X size={20} />
                     </button>
@@ -130,148 +181,176 @@ export function InfoPanel() {
 
                 {/* Content */}
                 <div className="info-panel-content">
-                    {/* Type Badge */}
-                    <div className="info-section">
-                        <div
-                            className="info-type-badge"
-                            style={{
-                                background: typeStyle.bg,
-                                color: typeStyle.color,
-                                border: `2px solid ${typeStyle.border}`,
-                            }}
-                        >
-                            <TypeIcon size={20} />
-                            <span>{item.type.charAt(0).toUpperCase() + item.type.slice(1)}</span>
-                        </div>
-                    </div>
-
-                    {/* Title */}
-                    <div className="info-section">
-                        <label className="info-label">Name</label>
-                        {isEditing ? (
-                            <input
-                                key={item.id}
-                                type="text"
-                                className="info-input"
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                onBlur={handleTitleSave}
-                                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-                                autoFocus
-                            />
-                        ) : (
-                            <div
-                                className="info-value editable"
-                                onClick={() => setIsEditing(true)}
-                            >
-                                {item.title}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Content Details */}
-                    <div className="info-section">
-                        <label className="info-label">Details</label>
-                        <div className="info-value">{getContentDetails()}</div>
-                    </div>
-
-                    {/* Link URL (for links) */}
-                    {item.type === 'link' && (
-                        <div className="info-section">
-                            <label className="info-label">URL</label>
-                            <a
-                                href={(item.content as LinkContent).url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="info-link"
-                            >
-                                {(item.content as LinkContent).url}
-                            </a>
-                        </div>
-                    )}
-
-                    {/* Priority */}
-                    <div className="info-section">
-                        <label className="info-label">
-                            <Flag size={14} />
-                            Priority
-                        </label>
-                        <div className="info-priority-options">
-                            {(['none', 'low', 'medium', 'high'] as PriorityLevel[]).map((p) => (
-                                <button
-                                    key={p}
-                                    className={`info-priority-btn ${item.priority === p ? 'active' : ''}`}
-                                    data-priority={p}
-                                    onClick={() => handlePriorityChange(p)}
+                    {activeTab === 'details' ? (
+                        <>
+                            {/* Type Badge */}
+                            <div className="info-section">
+                                <div
+                                    className="info-type-badge"
+                                    style={{
+                                        background: typeStyle.bg,
+                                        color: typeStyle.color,
+                                        border: `2px solid ${typeStyle.border}`,
+                                    }}
                                 >
-                                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Color */}
-                    <div className="info-section">
-                        <label className="info-label">
-                            <Palette size={14} />
-                            Color
-                        </label>
-                        <div className="info-color-options">
-                            {(Object.keys(CARD_COLORS) as CardColor[]).map((color) => (
-                                <button
-                                    key={color}
-                                    className={`info-color-btn ${item.bg_color === CARD_COLORS[color] ? 'active' : ''}`}
-                                    style={{ backgroundColor: CARD_COLORS[color] }}
-                                    onClick={() => handleColorChange(color)}
-                                />
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Dates */}
-                    <div className="info-section">
-                        <label className="info-label">
-                            <Calendar size={14} />
-                            Created
-                        </label>
-                        <div className="info-value">
-                            {formatDate(item.created_at)} at {formatTime(item.created_at)}
-                        </div>
-                    </div>
-
-                    <div className="info-section">
-                        <label className="info-label">
-                            <Clock size={14} />
-                            Modified
-                        </label>
-                        <div className="info-value">
-                            {formatDate(item.updated_at)} at {formatTime(item.updated_at)}
-                        </div>
-                    </div>
-
-                    {/* Due Date (if set) */}
-                    {item.scheduled_at && (
-                        <div className="info-section">
-                            <label className="info-label">
-                                <Calendar size={14} />
-                                Scheduled
-                            </label>
-                            <div className="info-value">
-                                {formatDate(item.scheduled_at)} at {formatTime(item.scheduled_at)}
+                                    <TypeIcon size={20} />
+                                    <span>{item.type.charAt(0).toUpperCase() + item.type.slice(1)}</span>
+                                </div>
                             </div>
+
+                            {/* Title */}
+                            <div className="info-section">
+                                <label className="info-label">Name</label>
+                                {isEditing ? (
+                                    <input
+                                        key={item.id}
+                                        type="text"
+                                        className="info-input"
+                                        value={title}
+                                        onChange={(e) => setTitle(e.target.value)}
+                                        onBlur={handleTitleSave}
+                                        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                                        autoFocus
+                                    />
+                                ) : (
+                                    <div
+                                        className="info-value editable"
+                                        onClick={() => setIsEditing(true)}
+                                    >
+                                        {item.title}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Content Details */}
+                            <div className="info-section">
+                                <label className="info-label">Details</label>
+                                <div className="info-value">{getContentDetails()}</div>
+                            </div>
+
+                            {/* Link URL (for links) */}
+                            {item.type === 'link' && (
+                                <div className="info-section">
+                                    <label className="info-label">URL</label>
+                                    <a
+                                        href={(item.content as LinkContent).url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="info-link"
+                                    >
+                                        {(item.content as LinkContent).url}
+                                    </a>
+                                </div>
+                            )}
+
+                            {/* Priority */}
+                            <div className="info-section">
+                                <label className="info-label">
+                                    <Flag size={14} />
+                                    Priority
+                                </label>
+                                <div className="info-priority-options">
+                                    {(['none', 'low', 'medium', 'high'] as PriorityLevel[]).map((p) => (
+                                        <button
+                                            key={p}
+                                            className={`info-priority-btn ${item.priority === p ? 'active' : ''}`}
+                                            data-priority={p}
+                                            onClick={() => handlePriorityChange(p)}
+                                        >
+                                            {p.charAt(0).toUpperCase() + p.slice(1)}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Color */}
+                            <div className="info-section">
+                                <label className="info-label">
+                                    <Palette size={14} />
+                                    Color
+                                </label>
+                                <div className="info-color-options">
+                                    {(Object.keys(CARD_COLORS) as CardColor[]).map((color) => (
+                                        <button
+                                            key={color}
+                                            className={`info-color-btn ${item.bg_color === CARD_COLORS[color] ? 'active' : ''}`}
+                                            style={{ backgroundColor: CARD_COLORS[color] }}
+                                            onClick={() => handleColorChange(color)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Dates */}
+                            <div className="info-section">
+                                <label className="info-label">
+                                    <Calendar size={14} />
+                                    Created
+                                </label>
+                                <div className="info-value">
+                                    {formatDate(item.created_at)} at {formatTime(item.created_at)}
+                                </div>
+                            </div>
+
+                            <div className="info-section">
+                                <label className="info-label">
+                                    <Clock size={14} />
+                                    Modified
+                                </label>
+                                <div className="info-value">
+                                    {formatDate(item.updated_at)} at {formatTime(item.updated_at)}
+                                </div>
+                            </div>
+
+                            {/* Due Date (if set) */}
+                            {item.scheduled_at && (
+                                <div className="info-section">
+                                    <label className="info-label">
+                                        <Calendar size={14} />
+                                        Scheduled
+                                    </label>
+                                    <div className="info-value">
+                                        {formatDate(item.scheduled_at)} at {formatTime(item.scheduled_at)}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Location */}
+                            <div className="info-section">
+                                <label className="info-label">
+                                    <Folder size={14} />
+                                    Location
+                                </label>
+                                <div className="info-value">
+                                    {item.folder_id ? 'In folder' : 'Root'}
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="history-list">
+                            {isLoadingHistory ? (
+                                <div style={{ padding: 20, textAlign: 'center', color: '#9CA3AF' }}>Loading history...</div>
+                            ) : versions.length === 0 ? (
+                                <div style={{ padding: 20, textAlign: 'center', color: '#9CA3AF' }}>
+                                    <History size={24} style={{ marginBottom: 8, opacity: 0.5 }} />
+                                    <p>No version history available.</p>
+                                </div>
+                            ) : (
+                                versions.map((v) => (
+                                    <div key={v.id} className="history-item">
+                                        <div className="history-meta">
+                                            <span className="history-version">v{v.version}</span>
+                                            <span className="history-date">{formatDate(v.created_at)} {formatTime(v.created_at)}</span>
+                                        </div>
+                                        <div className="history-title">{v.title}</div>
+                                        <button className="restore-btn" onClick={() => handleRestore(v)}>
+                                            <RotateCcw size={14} /> Restore
+                                        </button>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     )}
-
-                    {/* Location */}
-                    <div className="info-section">
-                        <label className="info-label">
-                            <Folder size={14} />
-                            Location
-                        </label>
-                        <div className="info-value">
-                            {item.folder_id ? 'In folder' : 'Root'}
-                        </div>
-                    </div>
                 </div>
 
                 {/* Footer Actions */}
@@ -289,6 +368,71 @@ export function InfoPanel() {
                     </button>
                 </div>
             </div>
+            
+            <style>{`
+                .info-tabs {
+                    display: flex;
+                    gap: 16px;
+                }
+                .info-tab {
+                    background: none;
+                    border: none;
+                    font-size: 1.1rem;
+                    font-weight: 600;
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    padding-bottom: 4px;
+                    border-bottom: 2px solid transparent;
+                    transition: all 0.2s;
+                }
+                .info-tab.active {
+                    color: var(--text-primary);
+                    border-bottom-color: var(--accent);
+                }
+                .history-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                }
+                .history-item {
+                    background: #F9FAFB;
+                    padding: 12px;
+                    border-radius: 8px;
+                    border: 1px solid var(--border-light);
+                }
+                .history-meta {
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 0.75rem;
+                    color: var(--text-muted);
+                    margin-bottom: 4px;
+                }
+                .history-version {
+                    font-weight: 600;
+                    background: #E5E7EB;
+                    padding: 2px 6px;
+                    border-radius: 4px;
+                }
+                .history-title {
+                    font-size: 0.9rem;
+                    font-weight: 500;
+                    margin-bottom: 8px;
+                }
+                .restore-btn {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 0.8rem;
+                    color: var(--accent);
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    padding: 4px 0;
+                }
+                .restore-btn:hover {
+                    text-decoration: underline;
+                }
+            `}</style>
         </>
     );
 }

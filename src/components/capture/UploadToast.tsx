@@ -1,165 +1,223 @@
-import { CheckCircle, XCircle, Upload, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { CheckCircle, XCircle, Upload, X, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { UploadItem } from '../../lib/types';
 
 export function UploadToast() {
     const { uploads, dismissUpload, dismissAllUploads } = useAppStore();
+    const [isMinimized, setIsMinimized] = useState(false);
+
+    // Auto-minimize when all done, auto-expand when new uploads start
+    useEffect(() => {
+        const hasActive = uploads.some(u => u.status === 'uploading');
+        if (hasActive && isMinimized) {
+            setIsMinimized(false);
+        } else if (!hasActive && !isMinimized && uploads.length > 0) {
+            // Optional: Auto-minimize after success?
+            // setTimeout(() => setIsMinimized(true), 3000);
+        }
+    }, [uploads.length, uploads.some(u => u.status === 'uploading')]);
 
     if (uploads.length === 0) return null;
 
-    const completedCount = uploads.filter(u => u.status !== 'uploading').length;
-    const uploadingCount = uploads.filter(u => u.status === 'uploading').length;
-    const successCount = uploads.filter(u => u.status === 'success').length;
-    const errorCount = uploads.filter(u => u.status === 'error').length;
+    const activeUploads = uploads.filter(u => u.status === 'uploading');
+    const failedUploads = uploads.filter(u => u.status === 'error');
+    const successUploads = uploads.filter(u => u.status === 'success');
+
+    const totalCount = uploads.length;
+    const activeCount = activeUploads.length;
+    
+    // Calculate global progress
+    const totalProgress = activeCount > 0 
+        ? Math.round(activeUploads.reduce((acc, u) => acc + u.progress, 0) / activeCount) 
+        : 100;
 
     return (
         <div style={{
             position: 'fixed',
-            bottom: 24,
+            bottom: 0,
             right: 24,
             zIndex: 9999,
+            width: 360,
+            background: '#fff',
+            borderRadius: '12px 12px 0 0',
+            boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
+            border: '1px solid var(--border-light)',
+            borderBottom: 'none',
             display: 'flex',
             flexDirection: 'column',
-            gap: 8,
-            maxWidth: 360,
-            width: '100%',
+            transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            transform: isMinimized ? 'translateY(calc(100% - 48px))' : 'translateY(0)',
         }}>
-            {/* Summary Card */}
-            <div style={{
-                background: '#fff',
-                borderRadius: 12,
-                padding: '12px 16px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                border: '1px solid var(--border-light)',
-            }}>
-                <div style={{
+            {/* Header / Minimized State */}
+            <div 
+                onClick={() => setIsMinimized(!isMinimized)}
+                style={{
+                    height: 48,
+                    padding: '0 16px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    marginBottom: 8,
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        fontWeight: 600,
-                        fontSize: '0.875rem',
-                        color: 'var(--text-primary)',
-                    }}>
-                        <Upload size={18} style={{ color: 'var(--accent)' }} />
-                        {uploadingCount > 0 ? `Uploading ${uploadingCount} file${uploadingCount > 1 ? 's' : ''}...` : 'Upload Complete'}
-                    </div>
-                    <button
-                        onClick={dismissAllUploads}
-                        style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: 4,
-                            color: 'var(--text-muted)',
-                            borderRadius: 4,
-                        }}
-                    >
-                        <X size={16} />
-                    </button>
+                    cursor: 'pointer',
+                    background: '#1F2937', // Dark header like Gmail
+                    color: 'white',
+                    borderRadius: isMinimized ? '12px 12px 0 0' : '12px 12px 0 0',
+                }}
+            >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {activeCount > 0 ? (
+                        <div style={{ position: 'relative', width: 20, height: 20 }}>
+                            <svg width="20" height="20" viewBox="0 0 36 36">
+                                <path
+                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                    fill="none"
+                                    stroke="#4B5563"
+                                    strokeWidth="4"
+                                />
+                                <path
+                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                    fill="none"
+                                    stroke="#10B981"
+                                    strokeWidth="4"
+                                    strokeDasharray={`${totalProgress}, 100`}
+                                />
+                            </svg>
+                        </div>
+                    ) : (
+                        <CheckCircle size={20} color="#10B981" />
+                    )}
+                    
+                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                        {activeCount > 0 
+                            ? `Uploading ${activeCount} item${activeCount !== 1 ? 's' : ''}` 
+                            : `${successUploads.length} item${successUploads.length !== 1 ? 's' : ''} uploaded`
+                        }
+                    </span>
                 </div>
 
-                {/* Summary Stats */}
-                {completedCount > 0 && (
-                    <div style={{
-                        display: 'flex',
-                        gap: 12,
-                        fontSize: '0.75rem',
-                        color: 'var(--text-secondary)',
-                        marginBottom: 8,
-                    }}>
-                        {successCount > 0 && (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#10B981' }}>
-                                <CheckCircle size={14} /> {successCount} successful
-                            </span>
-                        )}
-                        {errorCount > 0 && (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#EF4444' }}>
-                                <XCircle size={14} /> {errorCount} failed
-                            </span>
-                        )}
-                    </div>
-                )}
-
-                {/* Individual Uploads */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
-                    {uploads.slice(0, 5).map((upload) => (
-                        <UploadItemRow key={upload.id} upload={upload} onDismiss={dismissUpload} />
-                    ))}
-                    {uploads.length > 5 && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', paddingTop: 4 }}>
-                            +{uploads.length - 5} more
-                        </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button className="icon-btn-dark">
+                        {isMinimized ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </button>
+                    {!activeCount && (
+                        <button 
+                            className="icon-btn-dark"
+                            onClick={(e) => { e.stopPropagation(); dismissAllUploads(); }}
+                        >
+                            <X size={18} />
+                        </button>
                     )}
                 </div>
             </div>
+
+            {/* Expanded List */}
+            <div style={{
+                maxHeight: 300,
+                overflowY: 'auto',
+                background: '#fff',
+                display: 'flex',
+                flexDirection: 'column',
+            }}>
+                {uploads.map((upload) => (
+                    <UploadItemRow key={upload.id} upload={upload} onDismiss={dismissUpload} />
+                ))}
+            </div>
+
+            <style>{`
+                .icon-btn-dark {
+                    background: transparent;
+                    border: none;
+                    color: rgba(255,255,255,0.7);
+                    cursor: pointer;
+                    padding: 4px;
+                    border-radius: 4px;
+                    display: flex;
+                    align-items: center;
+                    transition: all 0.2s;
+                }
+                .icon-btn-dark:hover {
+                    color: white;
+                    background: rgba(255,255,255,0.1);
+                }
+            `}</style>
         </div>
     );
 }
 
 function UploadItemRow({ upload, onDismiss }: { upload: UploadItem; onDismiss: (id: string) => void }) {
+    const isError = upload.status === 'error';
+    const isSuccess = upload.status === 'success';
+    const isUploading = upload.status === 'uploading';
+
     return (
         <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '6px 8px',
-            background: upload.status === 'success' ? '#ECFDF5' : upload.status === 'error' ? '#FEF2F2' : '#F9FAFB',
-            borderRadius: 6,
-            fontSize: '0.8rem',
+            gap: 12,
+            padding: '12px 16px',
+            borderBottom: '1px solid #F3F4F6',
+            fontSize: '0.85rem',
         }}>
-            {upload.status === 'uploading' && (
-                <div style={{
-                    width: 16,
-                    height: 16,
-                    border: '2px solid var(--accent)',
-                    borderTopColor: 'transparent',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite',
-                }} />
-            )}
-            {upload.status === 'success' && <CheckCircle size={16} style={{ color: '#10B981' }} />}
-            {upload.status === 'error' && <XCircle size={16} style={{ color: '#EF4444' }} />}
+            {/* Status Icon */}
+            <div style={{ flexShrink: 0 }}>
+                {isUploading ? (
+                    <RefreshCw size={18} className="animate-spin" color="#F59E0B" />
+                ) : isSuccess ? (
+                    <CheckCircle size={18} color="#10B981" />
+                ) : (
+                    <XCircle size={18} color="#EF4444" />
+                )}
+            </div>
 
+            {/* Content */}
             <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                <div style={{ 
+                    fontWeight: 500, 
+                    color: '#374151',
                     whiteSpace: 'nowrap',
-                    color: 'var(--text-primary)',
-                    fontWeight: 500,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
                 }}>
                     {upload.fileName}
                 </div>
-                {upload.status === 'uploading' && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        {upload.progress}% • {upload.speed}
+                
+                {isUploading && (
+                    <div style={{ 
+                        marginTop: 4, 
+                        height: 4, 
+                        background: '#F3F4F6', 
+                        borderRadius: 2, 
+                        overflow: 'hidden' 
+                    }}>
+                        <div style={{ 
+                            width: `${upload.progress}%`, 
+                            height: '100%', 
+                            background: '#F59E0B', 
+                            transition: 'width 0.2s linear' 
+                        }} />
                     </div>
                 )}
-                {upload.status === 'error' && upload.error && (
-                    <div style={{ fontSize: '0.7rem', color: '#EF4444' }}>
-                        {upload.error}
+                
+                {isError && (
+                    <div style={{ fontSize: '0.75rem', color: '#EF4444', marginTop: 2 }}>
+                        {upload.error || 'Upload failed'}
                     </div>
                 )}
             </div>
 
-            {upload.status !== 'uploading' && (
-                <button
+            {/* Action */}
+            {!isUploading && (
+                <button 
                     onClick={() => onDismiss(upload.id)}
                     style={{
-                        background: 'none',
+                        background: 'transparent',
                         border: 'none',
+                        color: '#9CA3AF',
                         cursor: 'pointer',
-                        padding: 2,
-                        color: 'var(--text-muted)',
+                        padding: 4,
                     }}
                 >
-                    <X size={14} />
+                    <X size={16} />
                 </button>
             )}
         </div>

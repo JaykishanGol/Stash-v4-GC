@@ -86,27 +86,8 @@ export function DragDropOverlay() {
             const uploadId = generateId();
             const isImage = isImageFile(file.type);
 
-            // Add to upload queue UI
+            // Add to upload queue UI (Toast)
             addUpload(uploadId, file.name);
-
-            // OPTIMISTIC CREATION (Phase 1 Fix):
-            // Create the item record FIRST so we have a placeholder in DB
-            const newItemId = generateId(); // Pre-generate ID
-            const tempItem = createDefaultItem(user?.id || 'demo', isImage ? 'image' : 'file', {
-                id: newItemId,
-                title: file.name,
-                // Placeholder meta - indicates uploading state implicitly via missing path or specific flag
-                file_meta: {
-                    size: file.size,
-                    mime: file.type,
-                    path: `pending/${uploadId}`, // Temporary path
-                    originalName: file.name,
-                },
-                bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
-            });
-            
-            // Add to store (and DB via sync)
-            addItem(tempItem);
 
             try {
                 // Import dynamically
@@ -122,26 +103,28 @@ export function DragDropOverlay() {
 
                 if (error) throw error;
 
+                // Success! Create the Item now.
                 completeUpload(uploadId, true);
 
-                // Update the Item with the real path
-                // Access store directly to update the item we just created
-                useAppStore.getState().updateItem(newItemId, {
+                const newItemId = generateId();
+                const newItem = createDefaultItem(user?.id || 'demo', isImage ? 'image' : 'file', {
+                    id: newItemId,
+                    title: file.name,
                     file_meta: {
                         size: file.size,
                         mime: file.type,
                         path: path,
                         originalName: file.name,
-                    }
+                    },
+                    bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
                 });
+                
+                addItem(newItem);
 
             } catch (error) {
                 console.error('Upload failed:', error);
                 completeUpload(uploadId, false, (error as Error).message);
-                
-                // Cleanup: Mark item as error or delete it
-                // For now, let's delete the optimistically created item so we don't have broken links
-                useAppStore.getState().deleteItem(newItemId);
+                // No item created, so no zombie file.
             }
         };
 
