@@ -1,18 +1,23 @@
 import type { StateCreator } from 'zustand';
-import { 
+import {
     validateItemForSync,
 } from '../../lib/types';
 import type {
-    Item, 
-    Task, 
-    List, 
-    Folder, 
-    SmartFolderCounts, 
-    TodayStats, 
+    Item,
+    Task,
+    List,
+    Folder,
+    SmartFolderCounts,
+    TodayStats,
     UploadItem,
 } from '../../lib/types';
 import { persistentSyncQueue } from '../../lib/persistentQueue';
-import { GoogleSyncService } from '../../lib/googleSyncService';
+import { googleSyncQueue } from '../../lib/googleSyncQueue';
+import { 
+    undoStack, 
+    createDeleteItemsAction, 
+    createMoveItemsAction,
+} from '../../lib/undoStack';
 // Note: We might need to import the full AppState interface to type get() correctly, 
 // but to avoid circular deps we'll use 'any' or a partial type for get() in implementation.
 
@@ -23,7 +28,7 @@ export interface DataSlice {
     folders: Folder[];
     lists: List[];
     tasks: Task[];
-    
+
     // Stats
     smartFolderCounts: SmartFolderCounts;
     todayStats: TodayStats;
@@ -35,6 +40,12 @@ export interface DataSlice {
     hasMoreItems: boolean;
     itemsLoadedCount: number;
     loadMoreItems: () => Promise<void>;
+
+    // Undo/Redo State
+    canUndo: boolean;
+    canRedo: boolean;
+    undoDescription: string | null;
+    redoDescription: string | null;
 
     // ACTIONS
     // Item Actions
@@ -66,7 +77,7 @@ export interface DataSlice {
     addItemsToTask: (taskId: string, itemIds: string[]) => void;
     removeItemFromTask: (taskId: string, itemId: string) => void;
     toggleTaskItemCompletion: (taskId: string, itemId: string) => void;
-    
+
     // Folder Actions
     addFolder: (folder: Folder) => void;
 
@@ -92,11 +103,19 @@ export interface DataSlice {
     syncItemToDb: (item: Item) => Promise<void>;
     deleteItemFromDb: (id: string) => Promise<void>;
     syncTaskToDb: (task: Task) => Promise<void>;
-    
+
+    // Search Actions
+    searchItems: (query: string) => Promise<Item[]>;
+
     // Clipboard (Data logic)
     cutItems: (ids?: string[]) => void;
     copyItems: (ids?: string[]) => void;
     pasteItems: (targetFolderId?: string | null) => void;
+
+    // Undo/Redo Actions
+    undo: () => void;
+    redo: () => void;
+    updateUndoState: () => void;
 }
 
 export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
@@ -110,31 +129,84 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     uploads: [],
     hasMoreItems: false,
     itemsLoadedCount: 0,
+    
+    // Undo/Redo State
+    canUndo: undoStack.canUndo(),
+    canRedo: undoStack.canRedo(),
+    undoDescription: undoStack.getUndoDescription(),
+    redoDescription: undoStack.getRedoDescription(),
 
     loadMoreItems: async () => {
-        // Implementation deferred or needs to be copied. 
-        // For now, simple console log as placeholder if logic was complex.
-        console.log('Load more items...');
+        const state = get() as any;
+        const { user, itemsLoadedCount, hasMoreItems } = state;
+        
+        if (!user || !hasMoreItems) {
+            console.log('[Store] Load more skipped: no user or no more items');
+            return;
+        }
+
+        const PAGE_SIZE = 500;
+
+        try {
+            const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
+
+            if (!isSupabaseConfigured()) {
+                return;
+            }
+
+            console.log(`[Store] Loading more items from offset ${itemsLoadedCount}...`);
+
+            const { data: moreItems, error, count } = await supabase
+                .from('items')
+                .select('*', { count: 'exact' })
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .range(itemsLoadedCount, itemsLoadedCount + PAGE_SIZE - 1);
+
+            if (error) {
+                console.error('[Store] Error loading more items:', error);
+                return;
+            }
+
+            if (moreItems && moreItems.length > 0) {
+                const activeItems = moreItems.filter((i: any) => !i.deleted_at);
+                const trashedItems = moreItems.filter((i: any) => i.deleted_at);
+
+                set((state: any) => ({
+                    items: [...state.items, ...activeItems],
+                    trashedItems: [...state.trashedItems, ...trashedItems],
+                    itemsLoadedCount: state.itemsLoadedCount + moreItems.length,
+                    hasMoreItems: count ? (state.itemsLoadedCount + moreItems.length) < count : false,
+                }));
+
+                console.log(`[Store] Loaded ${moreItems.length} more items. Total: ${itemsLoadedCount + moreItems.length}`);
+                get().calculateStats();
+            } else {
+                set({ hasMoreItems: false });
+            }
+        } catch (error) {
+            console.error('[Store] Error in loadMoreItems:', error);
+        }
     },
 
     addItem: (item) => {
         // Mark as unsynced locally so it isn't wiped by loadUserData before sync
         const itemWithFlag = { ...item, is_unsynced: true };
-        
+
         // Context-Aware Creation: If inside a list, auto-link it
         const state = get() as any; // Cast to access UI slice
         const selectedListId = state.selectedListId;
-        
+
         set((state) => {
             let newLists = state.lists;
-            
+
             if (selectedListId) {
                 // Find and update the list
                 newLists = state.lists.map(list => {
                     if (list.id === selectedListId) {
-                        const updatedList = { 
-                            ...list, 
-                            items: [itemWithFlag.id, ...list.items], 
+                        const updatedList = {
+                            ...list,
+                            items: [itemWithFlag.id, ...list.items],
                             // Mark list as unsynced/updated if we had a flag, but for lists we rely on explicit sync
                         };
                         // Trigger sync for the list
@@ -145,7 +217,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
                 });
             }
 
-            return { 
+            return {
                 items: [itemWithFlag, ...state.items],
                 lists: newLists
             };
@@ -154,6 +226,14 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         get().calculateStats();
         get().refreshFolderCounts();
         get().syncItemToDb(itemWithFlag);
+
+        // Google Sync (if scheduled)
+        if (itemWithFlag.scheduled_at) {
+            googleSyncQueue.enqueue(itemWithFlag.id, 'event', itemWithFlag, {
+                start: itemWithFlag.scheduled_at,
+                end: itemWithFlag.scheduled_at,
+            });
+        }
     },
 
     updateItem: (id, updates) => {
@@ -163,11 +243,19 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             ),
         }));
         get().calculateStats();
-        
+
         // Find the updated item to sync
         const updatedItem = get().items.find(i => i.id === id);
         if (updatedItem) {
             get().syncItemToDb(updatedItem);
+
+            // Google Sync
+            if (updatedItem.scheduled_at) {
+                googleSyncQueue.enqueue(updatedItem.id, 'event', updatedItem, {
+                    start: updatedItem.scheduled_at,
+                    end: updatedItem.scheduled_at,
+                });
+            }
         }
     },
 
@@ -178,10 +266,30 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         }
     },
 
-    moveItemsToTrash: (ids) => {
+    moveItemsToTrash: async (ids) => {
         const now = new Date().toISOString();
         const state = get();
-        
+
+        // 1. Check for Folders to use RPC optimization
+        const folderIds = ids.filter(id => state.items.find(i => i.id === id)?.type === 'folder');
+
+        // If we have folders, try to use the Server-Side RPC first (Phase 1 Fix)
+        if (folderIds.length > 0) {
+            const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
+            if (isSupabaseConfigured()) {
+                // We execute one RPC per folder. 
+                // Ideally, we'd have a bulk RPC, but iterating 5 folders is better than iterating 5000 items.
+                for (const folderId of folderIds) {
+                    try {
+                        await supabase.rpc('delete_folder_recursive', { target_folder_id: folderId });
+                    } catch (err) {
+                        console.error('RPC delete failed, falling back to local recursion', err);
+                    }
+                }
+            }
+        }
+
+        // 2. Local Fallback / UI Update (Standard Logic)
         // Helper to collect all descendants of a folder
         const getDescendants = (folderId: string): string[] => {
             const children = state.items.filter(i => i.folder_id === folderId);
@@ -202,73 +310,97 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
                 allIdsToDelete = [...allIdsToDelete, ...getDescendants(id)];
             }
         });
-        
+
         // Unique IDs
         allIdsToDelete = [...new Set(allIdsToDelete)];
+
+        // Save items for undo BEFORE deleting
+        const itemsToTrash = state.items.filter(i => allIdsToDelete.includes(i.id));
+        
+        // Push to undo stack
+        undoStack.push(createDeleteItemsAction(itemsToTrash));
+        get().updateUndoState();
 
         set((state) => {
             const itemsToTrash = state.items.filter(i => allIdsToDelete.includes(i.id));
             const remainingItems = state.items.filter(i => !allIdsToDelete.includes(i.id));
-            
+
             const trashedWithTimestamp = itemsToTrash.map(i => ({
                 ...i,
                 deleted_at: now,
                 updated_at: now
             }));
 
-            // Sync deletion to DB
+            // Sync deletion to DB (Fallback for items not covered by RPC or if offline)
+            // If RPC succeeded, these upserts are redundant but harmless (idempotent)
             trashedWithTimestamp.forEach(item => {
-                // We use upsert with deleted_at set, effectively soft delete
                 get().syncItemToDb(item);
             });
 
             return {
                 items: remainingItems,
                 trashedItems: [...state.trashedItems, ...trashedWithTimestamp],
-                // Clear selection if deleted
-                // selectedItemIds: state.selectedItemIds.filter(id => !allIdsToDelete.includes(id)) 
-                // Note: selectedItemIds is in UISlice. We can't update it here directly in strict slicing.
-                // However, Zustand merge allows us to update 'selectedItemIds' if we cast.
-                // For safety in this refactor, we'll leave it. The UI should handle missing selection.
             };
         });
-        
-        // Cross-slice update (hacky but standard in Zustand without Immer)
-        // (set as any)({ selectedItemIds: [] }); // Clear selection
 
         get().calculateStats();
         get().refreshFolderCounts();
     },
 
     restoreItem: (id) => {
-         const itemToRestore = get().trashedItems.find(i => i.id === id);
-         if (!itemToRestore) return;
+        const itemToRestore = get().trashedItems.find(i => i.id === id);
+        if (!itemToRestore) return;
 
-         const now = new Date().toISOString();
-         const restoredItem = { ...itemToRestore, deleted_at: null, updated_at: now };
+        const now = new Date().toISOString();
+        const restoredItem = { ...itemToRestore, deleted_at: null, updated_at: now };
 
-         set(state => ({
-             trashedItems: state.trashedItems.filter(i => i.id !== id),
-             items: [...state.items, restoredItem]
-         }));
-         
-         get().syncItemToDb(restoredItem);
-         get().calculateStats();
-         get().refreshFolderCounts();
+        set(state => ({
+            trashedItems: state.trashedItems.filter(i => i.id !== id),
+            items: [...state.items, restoredItem]
+        }));
+
+        get().syncItemToDb(restoredItem);
+        get().calculateStats();
+        get().refreshFolderCounts();
     },
 
-    permanentlyDeleteItem: (id) => {
+    permanentlyDeleteItem: async (id) => {
+        const item = get().trashedItems.find(i => i.id === id);
+
+        // Clean up storage file if it's an image or file type
+        if (item && item.file_meta?.path) {
+            try {
+                const { deleteFile } = await import('../../lib/supabase');
+                await deleteFile(item.file_meta.path);
+                console.log('[DataSlice] Cleaned up storage file:', item.file_meta.path);
+            } catch (err) {
+                console.warn('[DataSlice] Failed to delete storage file:', err);
+                // Continue with DB deletion even if storage cleanup fails
+            }
+        }
+
         set(state => ({
             trashedItems: state.trashedItems.filter(i => i.id !== id)
         }));
         get().deleteItemFromDb(id);
     },
 
-    emptyTrash: () => {
+    emptyTrash: async () => {
         const { trashedItems } = get();
-        trashedItems.forEach(item => {
+
+        // Clean up all storage files first
+        for (const item of trashedItems) {
+            if (item.file_meta?.path) {
+                try {
+                    const { deleteFile } = await import('../../lib/supabase');
+                    await deleteFile(item.file_meta.path);
+                } catch (err) {
+                    console.warn('[DataSlice] Failed to delete storage file:', item.file_meta.path, err);
+                }
+            }
             get().deleteItemFromDb(item.id);
-        });
+        }
+
         set({ trashedItems: [] });
     },
 
@@ -288,26 +420,123 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
     moveItems: async (ids, folderId) => {
         const now = new Date().toISOString();
+        const state = get();
+
+        // Save original folder IDs for undo
+        const originalFolderIds = new Map<string, string | null>();
+        ids.forEach(id => {
+            const item = state.items.find(i => i.id === id);
+            if (item) originalFolderIds.set(id, item.folder_id);
+        });
+
+        // Get the first item's original folder (for undo description)
+        const firstItemFolder = originalFolderIds.get(ids[0]) || null;
+
+        // 1. Circular Dependency Check (Phase 1 Fix)
+        if (folderId) {
+            const state = get();
+
+            // Helper to check if folderId is a descendant of any movedId
+            const isDescendant = (childId: string, parentIds: string[]): boolean => {
+                if (parentIds.includes(childId)) return true;
+
+                const parent = state.items.find(i => i.id === childId);
+                if (!parent || !parent.folder_id) return false;
+
+                return isDescendant(parent.folder_id, parentIds);
+            };
+
+            // If we are moving Folder A into Folder B, 
+            // check if Folder B is actually inside Folder A (or is Folder A itself)
+            // We check if the TARGET (folderId) is a child of any MOVED item.
+            // Wait, logic is: Is 'folderId' (destination) inside 'id' (source)?
+            // We trace 'folderId' upwards. If we hit any 'id' in 'ids', it's a cycle.
+
+            let currentCheckId: string | null = folderId;
+            while (currentCheckId) {
+                if (ids.includes(currentCheckId)) {
+                    console.error("Circular dependency detected! Cannot move a folder into itself.");
+                    // Optionally notify user
+                    return;
+                }
+                const parent = state.items.find(i => i.id === currentCheckId);
+                currentCheckId = parent ? parent.folder_id : null;
+            }
+        }
+
+        // Push to undo stack before moving
+        undoStack.push(createMoveItemsAction(ids, firstItemFolder, folderId));
+        get().updateUndoState();
+
         set(state => ({
-            items: state.items.map(i => 
+            items: state.items.map(i =>
                 ids.includes(i.id) ? { ...i, folder_id: folderId, updated_at: now } : i
             )
         }));
-        
+
         ids.forEach(id => {
             const item = get().items.find(i => i.id === id);
             if (item) get().syncItemToDb(item);
         });
-        
+
         get().refreshFolderCounts();
     },
-    
+
+    // Search (Phase 3)
+    searchItems: async (query: string): Promise<Item[]> => {
+        if (!query || query.trim().length < 2) return [];
+
+        const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
+        if (!isSupabaseConfigured()) return [];
+
+        try {
+            const { data, error } = await supabase.rpc('search_items', { query_text: query });
+
+            if (error) {
+                console.error('Search RPC failed:', error);
+                return [];
+            }
+
+            // Convert result to Item[] structure (partial)
+            // The RPC returns { id, type, title, snippet, rank, updated_at }
+            // We might need to fetch full items or just map to a preview type.
+            // For now, let's map to a partial Item that the UI can render.
+            return (data as any[]).map(row => ({
+                id: row.id,
+                type: row.type,
+                title: row.title,
+                content: { text: row.snippet }, // Put snippet in text for preview
+                updated_at: row.updated_at,
+                // Defaults for required fields
+                user_id: '',
+                folder_id: null,
+                file_meta: null,
+                priority: 'none',
+                tags: [],
+                // Scheduler Defaults
+                scheduled_at: null,
+                remind_before: null,
+                recurring_config: null,
+                bg_color: '#FFFFFF',
+                is_pinned: false,
+                is_archived: false,
+                is_completed: false,
+                created_at: row.updated_at,
+                deleted_at: null
+            })) as Item[];
+
+        } catch (e) {
+            console.error('Search failed', e);
+            return [];
+        }
+    },
+
     archiveItem: async (id) => {
-         get().updateItem(id, { is_archived: true });
+        get().updateItem(id, { is_archived: true });
     },
 
     unarchiveItem: async (id) => {
-         get().updateItem(id, { is_archived: false });
+        get().updateItem(id, { is_archived: false });
     },
 
     duplicateItem: async (id) => {
@@ -328,34 +557,27 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
     // Scheduler
     setItemDueDate: (id, dueAt) => {
-        get().updateItem(id, { due_at: dueAt });
+        get().updateItem(id, { scheduled_at: dueAt });
     },
 
     setItemReminder: (id, remindAt) => {
-        // Updated to use ONLY new scheduler fields
-        get().updateItem(id, { 
-            next_trigger_at: remindAt,
-            reminder_type: remindAt ? 'one_time' : 'none',
-            // Explicitly clear legacy fields in local state so UI updates correctly
-            remind_at: null, 
-            reminder_recurring: null
+        // Set scheduled_at and remind_before = 0 means "at that exact time"
+        get().updateItem(id, {
+            scheduled_at: remindAt,
+            remind_before: remindAt ? 0 : null,
         });
     },
 
-    acknowledgeReminder: (id, type = 'item') => {
-        const now = new Date().toISOString();
-        if (type === 'task') {
-            get().updateTask(id, { last_acknowledged_at: now });
-        } else {
-            get().updateItem(id, { last_acknowledged_at: now });
-        }
+    acknowledgeReminder: (_id, _type = 'item') => {
+        // Simplified: No longer tracking last_acknowledged_at
+        // Could add a "snoozed" field in future if needed
     },
 
     // Tasks
     addTask: async (taskData) => {
         const now = new Date().toISOString();
         const { generateId } = await import('../../lib/utils');
-        
+
         const newTask: Task = {
             id: generateId(),
             created_at: now,
@@ -369,8 +591,8 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         get().calculateStats();
 
         // Google Sync
-        GoogleSyncService.syncToGoogleTask(newTask, { 
-            dueDate: newTask.due_at || undefined,
+        googleSyncQueue.enqueue(newTask.id, 'task', newTask, {
+            dueDate: newTask.scheduled_at || undefined,
             notes: newTask.description || undefined
         });
     },
@@ -382,10 +604,10 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         const task = get().tasks.find(t => t.id === id);
         if (task) {
             get().syncTaskToDb(task);
-            
+
             // Google Sync
-            GoogleSyncService.syncToGoogleTask(task, { 
-                dueDate: task.due_at || undefined,
+            googleSyncQueue.enqueue(task.id, 'task', task, {
+                dueDate: task.scheduled_at || undefined,
                 notes: task.description || undefined
             });
         }
@@ -405,15 +627,15 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             get().updateTask(id, { is_completed: !task.is_completed });
         }
     },
-    
+
     toggleTaskCompletion: (id) => {
-         get().completeTask(id);
+        get().completeTask(id);
     },
 
     addItemsToTask: (taskId, itemIds) => {
         const task = get().tasks.find(t => t.id === taskId);
         if (!task) return;
-        
+
         const newIds = [...new Set([...task.item_ids, ...itemIds])];
         get().updateTask(taskId, { item_ids: newIds });
     },
@@ -421,18 +643,18 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     removeItemFromTask: (taskId, itemId) => {
         const task = get().tasks.find(t => t.id === taskId);
         if (!task) return;
-        
+
         const newIds = task.item_ids.filter(id => id !== itemId);
         const newCompletion = { ...task.item_completion };
         delete newCompletion[itemId];
-        
+
         get().updateTask(taskId, { item_ids: newIds, item_completion: newCompletion });
     },
 
     toggleTaskItemCompletion: (taskId, itemId) => {
         const task = get().tasks.find(t => t.id === taskId);
         if (!task) return;
-        
+
         const current = task.item_completion[itemId] || false;
         get().updateTask(taskId, {
             item_completion: { ...task.item_completion, [itemId]: !current }
@@ -441,10 +663,10 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
     // Folders & Lists
     addFolder: (folder) => set(state => ({ folders: [...state.folders, folder] })),
-    
+
     createList: async (name, color) => {
         const { generateId } = await import('../../lib/utils');
-        
+
         const list: List = {
             id: generateId(),
             user_id: '', // Should be set by auth, but store usually handles this via get().user
@@ -479,7 +701,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     addItemsToList: (listId, itemIds) => {
         const list = get().lists.find(l => l.id === listId);
         if (!list) return;
-        
+
         const newItems = [...new Set([...list.items, ...itemIds])];
         get().updateList(listId, { items: newItems });
     },
@@ -487,7 +709,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     removeItemsFromList: (listId, itemIds) => {
         const list = get().lists.find(l => l.id === listId);
         if (!list) return;
-        
+
         const newItems = list.items.filter(id => !itemIds.includes(id));
         get().updateList(listId, { items: newItems });
     },
@@ -519,11 +741,12 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         tomorrow.setDate(tomorrow.getDate() + 1);
 
         items.forEach(item => {
-            if (item.deleted_at) return;
+            if (item.deleted_at || item.is_archived) return;
 
+            // Count ALL items by type (including nested in folders)
             if (item.type === 'folder') {
                 smartFolderCounts.folders++;
-            } else if (!item.folder_id) {
+            } else {
                 const typeMap: Record<string, keyof SmartFolderCounts> = {
                     note: 'notes', link: 'links', file: 'files', image: 'images'
                 };
@@ -531,31 +754,32 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
                 if (key) smartFolderCounts[key]++;
             }
 
-            if (item.due_at && !item.is_completed && !item.folder_id) {
-                const dueDate = new Date(item.due_at);
-                if (dueDate < today) todayStats.overdue++;
-                else if (dueDate >= today && dueDate < tomorrow) todayStats.dueToday++;
-            }
+            // Schedule stats (exclude items in folders to avoid noise)
+            if (item.scheduled_at && !item.is_completed) {
+                const scheduledDate = new Date(item.scheduled_at);
+                if (scheduledDate < today) todayStats.overdue++;
+                else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
 
-            if ((item.remind_at || item.next_trigger_at) && !item.folder_id) {
-                const remindDate = item.next_trigger_at ? new Date(item.next_trigger_at) : new Date(item.remind_at!);
-                if (remindDate >= today && remindDate < tomorrow) todayStats.reminders++;
-                todayStats.totalReminders++;
+                // Count as reminder if remind_before is set
+                if (item.remind_before !== null) {
+                    if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
+                    todayStats.totalReminders++;
+                }
             }
         });
 
         tasks.forEach(task => {
             if (task.is_completed) return;
             todayStats.tasks++;
-            if (task.due_at) {
-                const dueDate = new Date(task.due_at);
-                if (dueDate < today) todayStats.overdue++;
-                else if (dueDate >= today && dueDate < tomorrow) todayStats.dueToday++;
-            }
-            if (task.remind_at || task.next_trigger_at) {
-                const remindDate = task.next_trigger_at ? new Date(task.next_trigger_at) : new Date(task.remind_at!);
-                if (remindDate >= today && remindDate < tomorrow) todayStats.reminders++;
-                todayStats.totalReminders++;
+            if (task.scheduled_at) {
+                const scheduledDate = new Date(task.scheduled_at);
+                if (scheduledDate < today) todayStats.overdue++;
+                else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
+
+                if (task.remind_before !== null) {
+                    if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
+                    todayStats.totalReminders++;
+                }
             }
         });
 
@@ -565,16 +789,21 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     refreshFolderCounts: () => {
         const { items } = get();
         let hasChanges = false;
+        const updatedFolders: typeof items = [];
+
         const newItems = items.map(item => {
             if (item.type === 'folder') {
                 const count = items.filter(i => i.folder_id === item.id && !i.deleted_at).length;
                 const currentCount = (item.content as any).itemCount || 0;
                 if (count !== currentCount) {
                     hasChanges = true;
-                    return {
+                    const updatedFolder = {
                         ...item,
-                        content: { ...item.content, itemCount: count }
+                        content: { ...item.content, itemCount: count },
+                        updated_at: new Date().toISOString()
                     };
+                    updatedFolders.push(updatedFolder);
+                    return updatedFolder;
                 }
             }
             return item;
@@ -582,6 +811,11 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
 
         if (hasChanges) {
             set({ items: newItems });
+
+            // Sync updated folders to DB
+            updatedFolders.forEach(folder => {
+                get().syncItemToDb(folder);
+            });
         }
     },
 
@@ -625,7 +859,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         if (!clipboard.items.length || !clipboard.operation) return;
 
         const now = new Date().toISOString();
-        
+
         if (clipboard.operation === 'cut') {
             // Move items
             get().moveItems(clipboard.items.map((i: Item) => i.id), targetFolderId);
@@ -645,5 +879,183 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             });
             (set as any)({ clipboard: { items: [], operation: null } });
         }
+    },
+
+    // Undo/Redo Implementation
+    updateUndoState: () => {
+        set({
+            canUndo: undoStack.canUndo(),
+            canRedo: undoStack.canRedo(),
+            undoDescription: undoStack.getUndoDescription(),
+            redoDescription: undoStack.getRedoDescription(),
+        });
+    },
+
+    undo: () => {
+        const action = undoStack.popUndo();
+        if (!action) return;
+
+        console.log('[Undo] Executing:', action.type, action.description);
+
+        switch (action.type) {
+            case 'delete-items': {
+                // Restore deleted items
+                const itemsToRestore = action.items;
+                const now = new Date().toISOString();
+                
+                itemsToRestore.forEach(item => {
+                    const restoredItem = { ...item, deleted_at: null, updated_at: now };
+                    
+                    set(state => ({
+                        trashedItems: state.trashedItems.filter(i => i.id !== item.id),
+                        items: [...state.items, restoredItem]
+                    }));
+                    
+                    get().syncItemToDb(restoredItem);
+                });
+                break;
+            }
+            
+            case 'move-items': {
+                // Move items back to original folder
+                const { itemIds, fromFolderId } = action;
+                const now = new Date().toISOString();
+                
+                set(state => ({
+                    items: state.items.map(i =>
+                        itemIds.includes(i.id) 
+                            ? { ...i, folder_id: fromFolderId, updated_at: now } 
+                            : i
+                    )
+                }));
+                
+                itemIds.forEach(id => {
+                    const item = get().items.find(i => i.id === id);
+                    if (item) get().syncItemToDb(item);
+                });
+                break;
+            }
+            
+            case 'delete-task': {
+                // Restore deleted task
+                const { task } = action;
+                const restoredTask = { ...task, deleted_at: null, updated_at: new Date().toISOString() };
+                
+                set(state => ({ tasks: [restoredTask, ...state.tasks] }));
+                get().syncTaskToDb(restoredTask);
+                break;
+            }
+            
+            case 'bulk-archive': {
+                // Unarchive items
+                const { itemIds } = action;
+                itemIds.forEach(id => get().unarchiveItem(id));
+                break;
+            }
+            
+            case 'bulk-unarchive': {
+                // Re-archive items
+                const { itemIds } = action;
+                itemIds.forEach(id => get().archiveItem(id));
+                break;
+            }
+        }
+
+        get().calculateStats();
+        get().refreshFolderCounts();
+        get().updateUndoState();
+        
+        // Show notification
+        const state = get() as any;
+        state.addNotification?.('info', 'Undone', action.description);
+    },
+
+    redo: () => {
+        const action = undoStack.popRedo();
+        if (!action) return;
+
+        console.log('[Redo] Executing:', action.type, action.description);
+
+        switch (action.type) {
+            case 'delete-items': {
+                // Re-delete items
+                const itemIds = action.items.map(i => i.id);
+                // Use a simpler deletion that doesn't push to undo again
+                const now = new Date().toISOString();
+                
+                set(state => {
+                    const itemsToTrash = state.items.filter(i => itemIds.includes(i.id));
+                    const remainingItems = state.items.filter(i => !itemIds.includes(i.id));
+                    
+                    const trashedWithTimestamp = itemsToTrash.map(i => ({
+                        ...i,
+                        deleted_at: now,
+                        updated_at: now
+                    }));
+                    
+                    trashedWithTimestamp.forEach(item => {
+                        get().syncItemToDb(item);
+                    });
+                    
+                    return {
+                        items: remainingItems,
+                        trashedItems: [...state.trashedItems, ...trashedWithTimestamp],
+                    };
+                });
+                break;
+            }
+            
+            case 'move-items': {
+                // Re-move items to new folder
+                const { itemIds, toFolderId } = action;
+                const now = new Date().toISOString();
+                
+                set(state => ({
+                    items: state.items.map(i =>
+                        itemIds.includes(i.id) 
+                            ? { ...i, folder_id: toFolderId, updated_at: now } 
+                            : i
+                    )
+                }));
+                
+                itemIds.forEach(id => {
+                    const item = get().items.find(i => i.id === id);
+                    if (item) get().syncItemToDb(item);
+                });
+                break;
+            }
+            
+            case 'delete-task': {
+                // Re-delete task
+                const { task } = action;
+                set(state => ({
+                    tasks: state.tasks.filter(t => t.id !== task.id)
+                }));
+                persistentSyncQueue.add('delete-task', task.id, null);
+                break;
+            }
+            
+            case 'bulk-archive': {
+                // Re-archive items
+                const { itemIds } = action;
+                itemIds.forEach(id => get().archiveItem(id));
+                break;
+            }
+            
+            case 'bulk-unarchive': {
+                // Re-unarchive items
+                const { itemIds } = action;
+                itemIds.forEach(id => get().unarchiveItem(id));
+                break;
+            }
+        }
+
+        get().calculateStats();
+        get().refreshFolderCounts();
+        get().updateUndoState();
+        
+        // Show notification
+        const state = get() as any;
+        state.addNotification?.('info', 'Redone', action.description);
     }
 });

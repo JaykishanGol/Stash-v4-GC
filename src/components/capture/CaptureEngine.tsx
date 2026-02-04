@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Upload } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import type { FileMeta } from '../../lib/types';
 import { createDefaultItem } from '../../lib/types';
 import { generateId, isImageFile } from '../../lib/utils';
 import { UploadToast } from './UploadToast';
@@ -90,6 +89,25 @@ export function DragDropOverlay() {
             // Add to upload queue UI
             addUpload(uploadId, file.name);
 
+            // OPTIMISTIC CREATION (Phase 1 Fix):
+            // Create the item record FIRST so we have a placeholder in DB
+            const newItemId = generateId(); // Pre-generate ID
+            const tempItem = createDefaultItem(user?.id || 'demo', isImage ? 'image' : 'file', {
+                id: newItemId,
+                title: file.name,
+                // Placeholder meta - indicates uploading state implicitly via missing path or specific flag
+                file_meta: {
+                    size: file.size,
+                    mime: file.type,
+                    path: `pending/${uploadId}`, // Temporary path
+                    originalName: file.name,
+                },
+                bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
+            });
+            
+            // Add to store (and DB via sync)
+            addItem(tempItem);
+
             try {
                 // Import dynamically
                 const { uploadFile } = await import('../../lib/supabase');
@@ -106,24 +124,24 @@ export function DragDropOverlay() {
 
                 completeUpload(uploadId, true);
 
-                const fileMeta: FileMeta = {
-                    size: file.size,
-                    mime: file.type,
-                    path: path,
-                    originalName: file.name,
-                };
-
-                const newItem = createDefaultItem(user?.id || 'demo', isImage ? 'image' : 'file', {
-                    title: file.name,
-                    file_meta: fileMeta,
-                    bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
+                // Update the Item with the real path
+                // Access store directly to update the item we just created
+                useAppStore.getState().updateItem(newItemId, {
+                    file_meta: {
+                        size: file.size,
+                        mime: file.type,
+                        path: path,
+                        originalName: file.name,
+                    }
                 });
-
-                addItem(newItem);
 
             } catch (error) {
                 console.error('Upload failed:', error);
                 completeUpload(uploadId, false, (error as Error).message);
+                
+                // Cleanup: Mark item as error or delete it
+                // For now, let's delete the optimistically created item so we don't have broken links
+                useAppStore.getState().deleteItem(newItemId);
             }
         };
 

@@ -11,13 +11,14 @@ import type { ActiveView, PriorityLevel } from '../../lib/types';
  */
 export function RouteSyncer() {
     const [location] = useLocation();
-    const { 
-        setActiveView, 
-        setSelectedList, 
-        setSelectedFolder, 
-        setFilter, 
+    const {
+        setActiveView,
+        setSelectedList,
+        setSelectedFolder,
+        setFilter,
         setSelectedTask,
-        setListView // New atomic action
+        setListView,
+        setHeaderVisible
     } = useAppStore();
 
     // Route Matchers
@@ -29,11 +30,14 @@ export function RouteSyncer() {
 
     useEffect(() => {
         // 1. Reset specific filters by default
-        setSelectedTask(null); 
-        
+        setSelectedTask(null);
+
+        // Ensure mobile nav bar is visible after navigation
+        setHeaderVisible(true);
+
         // 2. Handle Routes
         if (location === '/') {
-            setActiveView('today');
+            setActiveView('home');
             setSelectedList(null);
             setSelectedFolder(null);
             setFilter('type', null);
@@ -42,7 +46,7 @@ export function RouteSyncer() {
         else if (isList && listParams) {
             // Atomic update to prevent "All Items" flash
             setListView(listParams.id);
-        } 
+        }
         else if (isFolder && folderParams) {
             setActiveView('folders'); // Or a specific 'folder-content' view if needed
             setSelectedFolder(folderParams.id);

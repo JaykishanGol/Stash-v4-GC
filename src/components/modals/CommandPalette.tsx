@@ -17,11 +17,14 @@ export function CommandPalette() {
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [serverResults, setServerResults] = useState<any[]>([]); // Phase 3: Server Results
     const inputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const debounceRef = useRef<any>(null);
 
     // Get store data for searching
     const items = useAppStore(state => state.items);
+    const searchItems = useAppStore(state => state.searchItems); // Phase 3 Action
     const toggleTheme = useAppStore(state => state.toggleTheme);
     const theme = useAppStore(state => state.theme);
     const setActiveView = useAppStore(state => state.setActiveView);
@@ -49,6 +52,23 @@ export function CommandPalette() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isOpen]);
 
+    // Phase 3: Server Side Search Effect
+    useEffect(() => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        
+        if (!query || query.length < 2) {
+            setServerResults([]);
+            return;
+        }
+
+        debounceRef.current = setTimeout(async () => {
+            const results = await searchItems(query);
+            setServerResults(results);
+        }, 300); // 300ms debounce
+
+        return () => clearTimeout(debounceRef.current);
+    }, [query, searchItems]);
+
     // Focus input on open
     useEffect(() => {
         if (isOpen) {
@@ -61,7 +81,7 @@ export function CommandPalette() {
     const q = query.toLowerCase();
 
     // 1. Navigation Commands
-    if (!q || 'dashboard'.includes(q)) results.push({ id: 'nav-dashboard', title: 'Go to Dashboard', type: 'navigation', icon: Command, action: () => navigateTo('today') });
+    if (!q || 'dashboard'.includes(q)) results.push({ id: 'nav-dashboard', title: 'Go to Dashboard', type: 'navigation', icon: Command, action: () => navigateTo('scheduled') });
     if (!q || 'calendar'.includes(q)) results.push({ id: 'nav-calendar', title: 'Go to Calendar', type: 'navigation', icon: Calendar, action: () => navigateTo('calendar') });
 
     // 2. System Commands
@@ -76,24 +96,31 @@ export function CommandPalette() {
         });
     }
 
-    // 3. Item Search (Top 5 matches)
+    // 3. Local + Server Item Search
+    // Use server results if available, otherwise fallback to local limited filter
+    const itemsToShow = serverResults.length > 0 ? serverResults : items.filter((i: any) => !i.deleted_at && i.title.toLowerCase().includes(q));
+
     if (q) {
-        items
-            .filter((i: any) => !i.deleted_at && i.title.toLowerCase().includes(q))
-            .slice(0, 5)
+        itemsToShow
+            .slice(0, 10) // Limit to 10
             .forEach((i: any) => {
-                results.push({
-                    id: i.id,
-                    title: i.title,
-                    type: 'item',
-                    icon: i.type === 'folder' ? Folder : File,
-                    description: i.type.toUpperCase(),
-                    action: () => {
-                        // Open item logic
-                        console.log('Open item', i.id);
-                        useAppStore.getState().setPreviewingItem(i); // Hacky direct access or better use store action
-                    }
-                });
+                // Deduplicate if already in list (unlikely with this logic flow but good practice)
+                if (!results.find(r => r.id === i.id)) {
+                    results.push({
+                        id: i.id,
+                        title: i.title,
+                        type: 'item',
+                        icon: i.type === 'folder' ? Folder : File,
+                        description: i.type.toUpperCase(),
+                        action: () => {
+                            // Open item logic
+                            console.log('Open item', i.id);
+                            // If it's a server result, it might be a partial item.
+                            // Ideally fetch full item or just preview what we have.
+                            useAppStore.getState().setPreviewingItem(i); 
+                        }
+                    });
+                }
             });
     }
 

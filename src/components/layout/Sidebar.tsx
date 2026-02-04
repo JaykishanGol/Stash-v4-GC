@@ -1,10 +1,9 @@
 import { useState, useCallback } from 'react';
 import {
     Search,
-    Sun,
+    Home,
     CalendarDays,
     AlertTriangle,
-    Bell,
     CheckCircle2,
     Calendar,
     Flag,
@@ -20,7 +19,8 @@ import {
     Plus,
     X,
     ListTodo,
-    Archive
+    Archive,
+    User
 } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { useAppStore } from '../../store/useAppStore';
@@ -29,10 +29,10 @@ import { ConfirmationModal } from '../modals/ConfirmationModal';
 
 // Priority colors
 const PRIORITY_COLORS: Record<PriorityLevel, string> = {
-    high: '#EF4444',
-    medium: '#F59E0B',
-    low: '#10B981',
-    none: '#9CA3AF',
+    high: 'var(--highlight)', // Was #EF4444
+    medium: 'var(--accent)',   // Was #F59E0B
+    low: '#10B981',            // Needs a variable, but keeping hex if no var exists yet. Let's use var(--card-green) or define a new one. 
+    none: 'var(--text-muted)', // Was #9CA3AF
 };
 
 interface NavItemProps {
@@ -164,7 +164,7 @@ function ListModalContent({ isOpen, onClose, onSubmit, initialData, title, submi
                         <X size={20} />
                     </button>
                 </div>
-                <div className="modal-body" style={{ padding: 20 }}>
+                <div className="modal-body">
                     <div style={{ marginBottom: 16 }}>
                         <label style={{
                             display: 'block',
@@ -230,40 +230,16 @@ function ListModalContent({ isOpen, onClose, onSubmit, initialData, title, submi
                         </div>
                     </div>
                 </div>
-                <div className="modal-footer" style={{
-                    padding: '16px 20px',
-                    borderTop: '1px solid #E5E7EB',
-                    display: 'flex',
-                    gap: 12,
-                    justifyContent: 'flex-end'
-                }}>
+                <div className="modal-footer">
                     <button
                         onClick={onClose}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            color: '#6B7280',
-                            background: '#F3F4F6',
-                            border: 'none',
-                            borderRadius: 8,
-                            cursor: 'pointer',
-                        }}
+                        className="btn btn-secondary"
                     >
                         Cancel
                     </button>
                     <button
                         onClick={handleSubmit}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            color: 'white',
-                            background: '#F59E0B',
-                            border: 'none',
-                            borderRadius: 8,
-                            cursor: 'pointer',
-                        }}
+                        className="btn btn-primary"
                     >
                         {submitLabel}
                     </button>
@@ -301,7 +277,7 @@ function NewFolderModal({ isOpen, onClose, onSubmit }: NewFolderModalProps) {
                         <X size={20} />
                     </button>
                 </div>
-                <div className="modal-body" style={{ padding: 20 }}>
+                <div className="modal-body">
                     <div style={{ marginBottom: 16 }}>
                         <label style={{
                             display: 'block',
@@ -335,40 +311,16 @@ function NewFolderModal({ isOpen, onClose, onSubmit }: NewFolderModalProps) {
                         />
                     </div>
                 </div>
-                <div className="modal-footer" style={{
-                    padding: '16px 20px',
-                    borderTop: '1px solid #E5E7EB',
-                    display: 'flex',
-                    gap: 12,
-                    justifyContent: 'flex-end'
-                }}>
+                <div className="modal-footer">
                     <button
                         onClick={onClose}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            color: '#6B7280',
-                            background: '#F3F4F6',
-                            border: 'none',
-                            borderRadius: 8,
-                            cursor: 'pointer',
-                        }}
+                        className="btn btn-secondary"
                     >
                         Cancel
                     </button>
                     <button
                         onClick={handleSubmit}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            color: 'white',
-                            background: '#F59E0B',
-                            border: 'none',
-                            borderRadius: 8,
-                            cursor: 'pointer',
-                        }}
+                        className="btn btn-primary"
                     >
                         Create Folder
                     </button>
@@ -443,7 +395,7 @@ export function Sidebar() {
 
     const handleViewClick = (view: ActiveView) => {
         closeSidebarOnMobile();
-        if (view === 'today') setLocation('/');
+        if (view === 'home') setLocation('/');
         else setLocation(`/${view}`);
     };
 
@@ -566,18 +518,17 @@ export function Sidebar() {
                         <h3 className="nav-section-title">Views</h3>
                         <ul className="nav-list">
                             <NavItem
-                                icon={<Sun size={20} />}
-                                label="Today"
-                                count={todayStats.dueToday + todayStats.reminders}
-                                isActive={activeView === 'today'}
-                                onClick={() => handleViewClick('today')}
+                                icon={<Home size={20} />}
+                                label="Home"
+                                isActive={activeView === 'home'}
+                                onClick={() => handleViewClick('home')}
                             />
                             <NavItem
                                 icon={<CalendarDays size={20} />}
-                                label="Due"
-                                count={todayStats.dueToday}
-                                isActive={activeView === 'upcoming'}
-                                onClick={() => handleViewClick('upcoming')}
+                                label="Scheduled"
+                                count={items.filter(i => i.scheduled_at && !i.deleted_at && !i.is_completed).length}
+                                isActive={activeView === 'scheduled'}
+                                onClick={() => handleViewClick('scheduled')}
                             />
                             <NavItem
                                 icon={<AlertTriangle size={20} />}
@@ -586,13 +537,6 @@ export function Sidebar() {
                                 isHighlight={todayStats.overdue > 0}
                                 isActive={activeView === 'overdue'}
                                 onClick={() => handleViewClick('overdue')}
-                            />
-                            <NavItem
-                                icon={<Bell size={20} />}
-                                label="Reminders"
-                                count={todayStats.totalReminders}
-                                isActive={activeView === 'reminders'}
-                                onClick={() => handleViewClick('reminders')}
                             />
                             <NavItem
                                 icon={<CheckCircle2 size={20} />}
@@ -699,15 +643,15 @@ export function Sidebar() {
                                             onDrop={(e) => handleListDrop(e, list.id)}
                                         />
                                         <div className="nav-item-actions">
-                                            <button 
-                                                className="nav-action-btn edit" 
+                                            <button
+                                                className="nav-action-btn edit"
                                                 onClick={(e) => { e.stopPropagation(); setEditingList(list); }}
                                                 title="Edit List"
                                             >
                                                 <Settings size={14} />
                                             </button>
-                                            <button 
-                                                className="nav-action-btn delete" 
+                                            <button
+                                                className="nav-action-btn delete"
                                                 onClick={(e) => { e.stopPropagation(); setDeletingList(list); }}
                                                 title="Delete List"
                                             >
@@ -767,24 +711,40 @@ export function Sidebar() {
                     </nav>
                 </div>
 
-                {/* Footer */}
+                {/* Footer - User Profile */}
                 <div className="sidebar-footer">
-                    <button className="footer-btn">
-                        <Settings size={20} />
-                        <span>Settings</span>
-                    </button>
                     {user && user.email !== 'demo@local' ? (
-                        <button className="footer-btn" style={{ color: '#10B981' }}>
-                            <LogIn size={20} />
-                            <span style={{ fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {user.email}
-                            </span>
-                        </button>
+                        <div className="user-card">
+                            <div className="user-avatar-placeholder">
+                                {user.email?.[0].toUpperCase()}
+                            </div>
+                            <div className="user-details">
+                                <span className="user-email" title={user.email}>{user.email}</span>
+                                <span className="user-plan">Pro Plan</span>
+                            </div>
+                            <button className="icon-action-btn" title="Settings">
+                                <Settings size={18} />
+                            </button>
+                        </div>
                     ) : (
-                        <button className="footer-btn" onClick={openAuthModal}>
-                            <LogIn size={20} />
-                            <span>Sign In</span>
-                        </button>
+                        <div className="guest-card">
+                            <div className="guest-header">
+                                <div className="user-avatar-placeholder guest">
+                                    <User size={16} />
+                                </div>
+                                <div className="user-details">
+                                    <span className="user-email">Guest User</span>
+                                    <span className="user-plan">Local Data Only</span>
+                                </div>
+                                <button className="icon-action-btn" title="Settings">
+                                    <Settings size={18} />
+                                </button>
+                            </div>
+                            <button className="signin-btn-full" onClick={openAuthModal}>
+                                <LogIn size={16} />
+                                <span>Sign In to Sync</span>
+                            </button>
+                        </div>
                     )}
                 </div>
 
@@ -831,7 +791,7 @@ export function Sidebar() {
                     confirmLabel="Delete"
                     isDanger
                 />
-                
+
                 <style>{`
                     .sidebar-overlay {
                         display: none;
@@ -889,6 +849,97 @@ export function Sidebar() {
                     .nav-action-btn.delete:hover {
                         color: #EF4444;
                         background: #FEE2E2;
+                    }
+
+                    /* User Profile Styles */
+                    .user-card, .guest-card {
+                        background: #F9FAFB;
+                        border-radius: 12px;
+                        padding: 12px;
+                        border: 1px solid var(--border-light);
+                    }
+                    .user-card {
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                    }
+                    .user-avatar-placeholder {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 50%;
+                        background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+                        color: white;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-weight: 600;
+                        font-size: 0.9rem;
+                        flex-shrink: 0;
+                    }
+                    .user-avatar-placeholder.guest {
+                        background: #E5E7EB;
+                        color: #6B7280;
+                    }
+                    .user-details {
+                        flex: 1;
+                        display: flex;
+                        flex-direction: column;
+                        min-width: 0;
+                    }
+                    .user-email {
+                        font-size: 0.85rem;
+                        font-weight: 600;
+                        color: var(--text-primary);
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+                    .user-plan {
+                        font-size: 0.7rem;
+                        color: var(--text-secondary);
+                    }
+                    .icon-action-btn {
+                        width: 32px;
+                        height: 32px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        border: none;
+                        background: transparent;
+                        color: var(--text-secondary);
+                        border-radius: 6px;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                    }
+                    .icon-action-btn:hover {
+                        background: rgba(0,0,0,0.05);
+                        color: var(--text-primary);
+                    }
+
+                    .guest-header {
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        margin-bottom: 12px;
+                    }
+                    .signin-btn-full {
+                        width: 100%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
+                        padding: 8px;
+                        background: var(--primary);
+                        color: white;
+                        border: none;
+                        border-radius: 8px;
+                        font-size: 0.85rem;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: opacity 0.2s;
+                    }
+                    .signin-btn-full:hover {
+                        opacity: 0.9;
                     }
                 `}</style>
             </aside>

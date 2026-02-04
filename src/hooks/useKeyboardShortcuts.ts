@@ -11,7 +11,11 @@ export function useKeyboardShortcuts() {
         selectedItemIds,
         moveItemsToTrash,
         isSchedulerOpen,
-        isAuthModalOpen
+        isAuthModalOpen,
+        undo,
+        redo,
+        canUndo,
+        canRedo
     } = useAppStore();
 
     useEffect(() => {
@@ -25,6 +29,24 @@ export function useKeyboardShortcuts() {
             // Ignore if modals are open (except QuickAdd which has its own close logic, or we handle it here)
             // But we might want Escape to close them.
             if (isSchedulerOpen || isAuthModalOpen) return;
+
+            // Cmd/Ctrl + Z for Undo
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                if (canUndo) {
+                    undo();
+                }
+                return;
+            }
+
+            // Cmd/Ctrl + Shift + Z or Cmd/Ctrl + Y for Redo
+            if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+                e.preventDefault();
+                if (canRedo) {
+                    redo();
+                }
+                return;
+            }
 
             // Cmd/Ctrl + A for Select All
             if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
@@ -63,5 +85,5 @@ export function useKeyboardShortcuts() {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [openQuickAdd, isQuickAddOpen, closeQuickAdd, selectAll, clearSelection, selectedItemIds, moveItemsToTrash, isSchedulerOpen, isAuthModalOpen]);
+    }, [openQuickAdd, isQuickAddOpen, closeQuickAdd, selectAll, clearSelection, selectedItemIds, moveItemsToTrash, isSchedulerOpen, isAuthModalOpen, undo, redo, canUndo, canRedo]);
 }

@@ -1,19 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, format } from 'date-fns';
 import { CalendarGrid } from './CalendarGrid';
 import { CalendarWeekView } from './CalendarWeekView';
-import { CalendarSidebar } from './CalendarSidebar';
+import { MobileCalendarView } from './MobileCalendarView';
 import { TasksPanel } from './TasksPanel';
-import { ChevronLeft, ChevronRight, Settings, HelpCircle, Search, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Layout, Calendar as CalendarIcon } from 'lucide-react';
 import { useGoogleCalendar } from '../../hooks/useGoogleCalendar';
 
 export function CalendarLayout() {
     const [viewDate, setViewDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
     const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
+    const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false); // Toggleable Panel
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
     // Sync Hook
     const { isLoading, refresh, getEntriesForDate } = useGoogleCalendar(viewDate);
+
+    // Handle Mobile Resize
+    useEffect(() => {
+        const handleResize = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     const nextPeriod = () => {
         if (viewMode === 'week') setViewDate(d => addWeeks(d, 1));
@@ -33,51 +44,99 @@ export function CalendarLayout() {
         setSelectedDate(today);
     };
 
+    if (isMobile) {
+        return (
+            <div className="gcal-layout" style={{ height: '100vh', background: 'var(--bg-app)' }}>
+                <MobileCalendarView 
+                    selectedDate={selectedDate || new Date()} 
+                    onSelectDate={(date) => {
+                        setSelectedDate(date);
+                        setViewDate(date); // Sync view date for google fetch
+                    }}
+                    getEntriesForDate={getEntriesForDate}
+                />
+            </div>
+        );
+    }
+
     return (
-        <div className="gcal-layout">
-            {/* Left Sidebar */}
-            <CalendarSidebar
-                selectedDate={selectedDate}
-                onDateChange={setViewDate}
-                onDateSelect={setSelectedDate}
-            />
-
-            {/* Main Content */}
-            <div className="gcal-main">
-                {/* Header Bar */}
-                <header className="gcal-header">
-                    <div className="header-left">
-                        <button className="today-btn" onClick={jumpToToday}>Today</button>
-                        <div className="nav-arrows">
-                            <button onClick={prevPeriod}><ChevronLeft size={20} /></button>
-                            <button onClick={nextPeriod}><ChevronRight size={20} /></button>
-                        </div>
-                        <h1 className="current-month">{format(viewDate, 'MMMM yyyy')}</h1>
+        <div className="gcal-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)', overflow: 'hidden' }}>
+            
+            {/* Unified Header */}
+            <header className="gcal-header" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 24px', borderBottom: '1px solid var(--border-light)', background: 'var(--bg-content)',
+                flexShrink: 0
+            }}>
+                <div className="header-left" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <CalendarIcon size={24} color="var(--primary)" />
+                        <h1 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)', margin: 0, minWidth: 180 }}>
+                            {format(viewDate, 'MMMM yyyy')}
+                        </h1>
                     </div>
-                    <div className="header-right">
-                        <button 
-                            className={`icon-btn ${isLoading ? 'rotating' : ''}`} 
-                            onClick={refresh}
-                            title="Refresh Calendar"
-                        >
-                            <RefreshCw size={20} />
+                    
+                    <div className="nav-controls" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-app)', padding: 4, borderRadius: 8 }}>
+                        <button onClick={prevPeriod} style={{ padding: 6, border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 4, display: 'flex' }}>
+                            <ChevronLeft size={18} color="var(--text-secondary)" />
                         </button>
-                        <button className="icon-btn"><Search size={20} /></button>
-                        <button className="icon-btn"><Settings size={20} /></button>
-                        <select 
-                            className="view-selector"
-                            value={viewMode}
-                            onChange={(e) => setViewMode(e.target.value as any)}
-                        >
-                            <option value="month">Month</option>
-                            <option value="week">Week</option>
-                            <option value="day">Day</option>
-                        </select>
+                        <button onClick={jumpToToday} style={{ 
+                            padding: '4px 12px', border: 'none', background: 'var(--bg-content)', 
+                            borderRadius: 6, fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)', cursor: 'pointer' 
+                        }}>
+                            Today
+                        </button>
+                        <button onClick={nextPeriod} style={{ padding: 6, border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 4, display: 'flex' }}>
+                            <ChevronRight size={18} color="var(--text-secondary)" />
+                        </button>
                     </div>
-                </header>
+                </div>
 
-                {/* Calendar Grid */}
-                <div className="gcal-grid-container">
+                <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ display: 'flex', gap: 4, background: 'var(--bg-app)', padding: 4, borderRadius: 8 }}>
+                        {(['month', 'week', 'day'] as const).map(mode => (
+                            <button
+                                key={mode}
+                                onClick={() => setViewMode(mode)}
+                                style={{
+                                    padding: '6px 12px', border: 'none', borderRadius: 6,
+                                    background: viewMode === mode ? 'white' : 'transparent',
+                                    color: viewMode === mode ? 'var(--primary)' : 'var(--text-secondary)',
+                                    fontWeight: 500, fontSize: '13px', cursor: 'pointer',
+                                    boxShadow: viewMode === mode ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                                    textTransform: 'capitalize'
+                                }}
+                            >
+                                {mode}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div style={{ width: 1, height: 24, background: 'var(--border-light)', margin: '0 8px' }} />
+
+                    <button className={`icon-btn ${isLoading ? 'rotating' : ''}`} onClick={refresh} title="Refresh">
+                        <RefreshCw size={18} />
+                    </button>
+                    
+                    <button 
+                        className={`icon-btn ${isTaskPanelOpen ? 'active' : ''}`} 
+                        onClick={() => setIsTaskPanelOpen(!isTaskPanelOpen)}
+                        title="Toggle Tasks Panel"
+                        style={{ 
+                            background: isTaskPanelOpen ? 'var(--bg-selection)' : 'transparent',
+                            color: isTaskPanelOpen ? 'var(--primary)' : 'inherit'
+                        }}
+                    >
+                        <Layout size={18} />
+                    </button>
+                </div>
+            </header>
+
+            {/* Main Content Area */}
+            <div className="gcal-body" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+                {/* Calendar Grid (Takes remaining width) */}
+                <div className="gcal-grid-wrapper" style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
                     {viewMode === 'month' ? (
                         <CalendarGrid
                             viewDate={viewDate}
@@ -94,110 +153,34 @@ export function CalendarLayout() {
                         />
                     )}
                 </div>
+
+                {/* Right Tasks Panel (Conditional Slide-in) */}
+                {isTaskPanelOpen && (
+                    <div className="tasks-sidebar" style={{ 
+                        width: 320, borderLeft: '1px solid var(--border-light)', 
+                        background: 'var(--bg-content)', display: 'flex', flexDirection: 'column' 
+                    }}>
+                        <TasksPanel />
+                    </div>
+                )}
             </div>
 
-            {/* Right Tasks Panel */}
-            <TasksPanel />
-
             <style>{`
-                .gcal-layout {
-                    display: flex;
-                    height: 100vh;
-                    background: var(--bg-app);
-                    overflow: hidden;
-                }
-
-                .gcal-main {
-                    flex: 1;
-                    display: flex;
-                    flex-direction: column;
-                    min-width: 0;
-                    overflow: hidden;
-                }
-
-                .gcal-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 8px 16px;
-                    border-bottom: 1px solid var(--border-light);
-                    background: var(--bg-content);
-                }
-                .header-left {
-                    display: flex;
-                    align-items: center;
-                    gap: 16px;
-                }
-                .today-btn {
-                    padding: 8px 16px;
-                    border: 1px solid var(--border-light);
-                    border-radius: 4px;
-                    background: white;
-                    font-size: 14px;
-                    font-weight: 500;
-                    cursor: pointer;
-                }
-                .today-btn:hover { background: #f1f3f4; }
-                .nav-arrows {
-                    display: flex;
-                    gap: 4px;
-                }
-                .nav-arrows button {
-                    padding: 8px;
-                    border: none;
-                    background: none;
-                    border-radius: 50%;
-                    cursor: pointer;
-                    color: var(--text-secondary);
-                }
-                .nav-arrows button:hover { background: rgba(0,0,0,0.05); }
-                .current-month {
-                    font-size: 22px;
-                    font-weight: 400;
-                    color: var(--text-primary);
-                    margin: 0;
-                }
-
-                .header-right {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                }
                 .icon-btn {
                     padding: 8px;
                     border: none;
                     background: none;
-                    border-radius: 50%;
+                    border-radius: 6px;
                     cursor: pointer;
                     color: var(--text-secondary);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.2s;
                 }
-                .icon-btn:hover { background: rgba(0,0,0,0.05); }
-                .rotating {
-                    animation: spin 1s linear infinite;
-                }
+                .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+                .rotating { animation: spin 1s linear infinite; }
                 @keyframes spin { 100% { transform: rotate(360deg); } }
-                .view-selector {
-                    padding: 8px 12px;
-                    border: 1px solid var(--border-light);
-                    border-radius: 4px;
-                    background: white;
-                    font-size: 14px;
-                    cursor: pointer;
-                }
-
-                .gcal-grid-container {
-                    flex: 1;
-                    overflow: auto;
-                    padding: 0;
-                }
-
-                /* Responsive adjustments */
-                @media (max-width: 1200px) {
-                    .gcal-sidebar { display: none; }
-                }
-                @media (max-width: 900px) {
-                    .tasks-panel { display: none; }
-                }
             `}</style>
         </div>
     );

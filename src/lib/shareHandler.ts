@@ -1,108 +1,149 @@
-import { createDefaultItem } from './types';
-import type { Item, ItemType } from './types';
+import { type Item } from './types';
+import { generateId } from './utils';
 
 const SHARE_DB_NAME = 'stash-share-db';
 const SHARE_STORE_NAME = 'shares';
-const DB_VERSION = 2; // Sync with Service Worker
+const DB_VERSION = 2; // Must match sw.js
+
+export interface ShareData {
+    id?: number;
+    title: string;
+    text: string;
+    url: string;
+    files: {
+        name: string;
+        type: string;
+        buffer: ArrayBuffer;
+    }[];
+    timestamp: number;
+}
 
 function openShareDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(SHARE_DB_NAME, DB_VERSION);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
-        // We don't handle upgrade here usually, as SW does it, but for robustness:
-        request.onupgradeneeded = (event) => {
-             const db = (event.target as IDBOpenDBRequest).result;
-             if (!db.objectStoreNames.contains(SHARE_STORE_NAME)) {
-                 db.createObjectStore(SHARE_STORE_NAME, { keyPath: 'id', autoIncrement: true });
-             }
-        };
     });
 }
 
-export async function getPendingShares(): Promise<any[]> {
-    try {
-        const db = await openShareDB();
-        return new Promise<any[]>((resolve, reject) => {
-            const tx = db.transaction(SHARE_STORE_NAME, 'readwrite');
-            const store = tx.objectStore(SHARE_STORE_NAME);
-            const request = store.getAll();
-            
-            request.onsuccess = () => {
-                const shares = request.result;
-                // DO NOT clear here. We clear only after successful processing in UI.
-                resolve(shares);
-            };
-            request.onerror = () => reject(request.error);
-        });
-    } catch (e) {
-        console.error('Error reading shares:', e);
-        return [];
-    }
+export async function getPendingShares(): Promise<ShareData[]> {
+    const db = await openShareDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(SHARE_STORE_NAME, 'readonly');
+        const store = tx.objectStore(SHARE_STORE_NAME);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
 }
 
-export async function clearPendingShares(): Promise<void> {
-    try {
-        const db = await openShareDB();
-        return new Promise<void>((resolve, reject) => {
-            const tx = db.transaction(SHARE_STORE_NAME, 'readwrite');
-            const store = tx.objectStore(SHARE_STORE_NAME);
-            const request = store.clear();
-            
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-        });
-    } catch (e) {
-        console.error('Error clearing shares:', e);
-    }
+export async function clearPendingShares() {
+    const db = await openShareDB();
+    return new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(SHARE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(SHARE_STORE_NAME);
+        const request = store.clear();
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
 }
 
-export function processShare(share: any, userId: string): Item | null {
+/**
+ * Converts raw share data into a Stash Item
+ */
+export function processShare(share: ShareData, userId: string): Item | null {
+    const now = new Date().toISOString();
+
     // 1. Files
     if (share.files && share.files.length > 0) {
-        const file = share.files[0]; // Handle first file for now
+        const file = share.files[0];
         const blob = new Blob([file.buffer], { type: file.type });
-        const url = URL.createObjectURL(blob);
-        
-        const type: ItemType = file.type.startsWith('image/') ? 'image' : 'file';
-        
-        return createDefaultItem(userId, type, {
-            title: share.title || file.name || 'Shared File',
+        const objectUrl = URL.createObjectURL(blob);
+
+        return {
+            id: generateId(),
+            user_id: userId,
+            folder_id: null,
+            type: file.type.startsWith('image/') ? 'image' : 'file',
+            title: share.title || file.name,
+            content: {
+                url: objectUrl,
+                preview: objectUrl
+            },
             file_meta: {
                 size: file.buffer.byteLength,
                 mime: file.type,
-                path: url, // Temporary Blob URL
+                path: objectUrl,
                 originalName: file.name
             },
-            content: { description: share.text || '' }
-        });
+            priority: 'none',
+            tags: ['shared'],
+            scheduled_at: null,
+            remind_before: null,
+            recurring_config: null,
+            bg_color: '',
+            is_pinned: false,
+            is_archived: false,
+            is_completed: false,
+            created_at: now,
+            updated_at: now,
+            deleted_at: null
+        } as Item;
     }
 
-    // 2. URL
+    // 2. Link
     if (share.url) {
-        return createDefaultItem(userId, 'link', {
+        return {
+            id: generateId(),
+            user_id: userId,
+            folder_id: null,
+            type: 'link',
             title: share.title || share.url,
-            content: { 
+            content: {
                 url: share.url,
-                description: share.text 
-            }
-        });
+                description: share.text
+            },
+            file_meta: null,
+            priority: 'none',
+            tags: ['shared'],
+            scheduled_at: null,
+            remind_before: null,
+            recurring_config: null,
+            bg_color: '',
+            is_pinned: false,
+            is_archived: false,
+            is_completed: false,
+            created_at: now,
+            updated_at: now,
+            deleted_at: null
+        };
     }
 
-    // 3. Text
-    if (share.text) {
-        // Check if text is a URL
-        if (share.text.startsWith('http')) {
-             return createDefaultItem(userId, 'link', {
-                title: share.title || share.text,
-                content: { url: share.text }
-            });
-        }
-
-        return createDefaultItem(userId, 'note', {
+    // 3. Text Note
+    if (share.text || share.title) {
+        return {
+            id: generateId(),
+            user_id: userId,
+            folder_id: null,
+            type: 'note',
             title: share.title || 'Shared Note',
-            content: { text: share.text }
-        });
+            content: {
+                text: share.text
+            },
+            file_meta: null,
+            priority: 'none',
+            tags: ['shared'],
+            scheduled_at: null,
+            remind_before: null,
+            recurring_config: null,
+            bg_color: '',
+            is_pinned: false,
+            is_archived: false,
+            is_completed: false,
+            created_at: now,
+            updated_at: now,
+            deleted_at: null
+        };
     }
 
     return null;

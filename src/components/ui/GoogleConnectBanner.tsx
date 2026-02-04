@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { GoogleClient } from '../../lib/googleClient';
 
 interface GoogleConnectBannerProps {
     className?: string;
@@ -27,7 +26,7 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
                 .select('is_google_connected')
                 .eq('user_id', user.id)
                 .single();
-            
+
             if (data?.is_google_connected) {
                 setIsConnectedInDb(true);
             }
@@ -39,9 +38,9 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
         // Mark intent in DB before redirecting
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-            await supabase.from('user_settings').upsert({ 
-                user_id: user.id, 
-                is_google_connected: true 
+            await supabase.from('user_settings').upsert({
+                user_id: user.id,
+                is_google_connected: true
             });
         }
 
@@ -91,8 +90,8 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
             <div className="banner-content">
                 <strong>{isConnectedInDb ? 'Google Connection Expired' : 'Connect Google Account'}</strong>
                 <p>
-                    {isConnectedInDb 
-                        ? 'Your secure session has ended. Please reconnect to sync events.' 
+                    {isConnectedInDb
+                        ? 'Your secure session has ended. Please reconnect to sync events.'
                         : 'Sync your events and tasks with Google Calendar'}
                 </p>
             </div>

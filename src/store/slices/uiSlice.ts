@@ -152,7 +152,7 @@ export interface UISlice {
 export const createUISlice: StateCreator<UISlice> = (set, get) => ({
     isSidebarOpen: true,
     viewMode: 'grid',
-    activeView: 'today',
+    activeView: 'home',
     selectedFolderId: null,
     selectedListId: null,
     selectedTaskId: null,
@@ -191,20 +191,21 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
 
     setHeaderVisible: (visible) => set({ isHeaderVisible: visible }),
 
-            setSelectedFolder: (id) => set({ selectedFolderId: id, selectedListId: null, selectedTaskId: null }),
-            setSelectedList: (id) => set({ selectedListId: id, selectedFolderId: null, selectedTaskId: null }),
-            setSelectedTask: (id) => set({ selectedTaskId: id }),
-            setListView: (listId) => set({ 
-                activeView: 'all', 
-                selectedListId: listId, 
-                selectedFolderId: null, 
-                selectedTaskId: null,
-                // Clear filters to ensure list content is visible
-                filters: { type: null, priority: null },
-                searchQuery: ''
-            }),
-        
-            openQuickAdd: (type = 'note') => set({ isQuickAddOpen: true, quickAddType: type }),    closeQuickAdd: () => set({ isQuickAddOpen: false }),
+    setSelectedFolder: (id) => set({ selectedFolderId: id, selectedListId: null, selectedTaskId: null }),
+    setSelectedList: (id) => set({ selectedListId: id, selectedFolderId: null, selectedTaskId: null }),
+    setSelectedTask: (id) => set({ selectedTaskId: id }),
+    setListView: (listId) => set({
+        activeView: 'all',
+        selectedListId: listId,
+        selectedFolderId: null,
+        selectedTaskId: null,
+        // Clear filters to ensure list content is visible
+        filters: { type: null, priority: null },
+        searchQuery: ''
+    }),
+
+    openQuickAdd: (type = 'note') => set({ isQuickAddOpen: true, quickAddType: type }),
+    closeQuickAdd: () => set({ isQuickAddOpen: false, editingItem: null }),
     setQuickAddType: (type) => set({ quickAddType: type }),
 
     setEditingItem: (item) => set({

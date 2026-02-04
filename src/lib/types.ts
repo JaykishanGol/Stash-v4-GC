@@ -47,7 +47,7 @@ export interface FileMeta {
 }
 
 // ============ MAIN ITEM INTERFACE ============
-// SIMPLIFIED: removed reminders[], due_dates[], project_id
+// SIMPLIFIED: Scheduler fields reduced to 2 core concepts
 
 export interface Item {
   id: string;
@@ -58,19 +58,13 @@ export interface Item {
   content: NoteContent | LinkContent | FolderContent | Record<string, unknown>;
   file_meta: FileMeta | null;
   priority: PriorityLevel;
-  tags: string[];             // New: Tags for categorization
-  due_at: string | null;      // ISO string
+  tags: string[];
 
-  // Scheduler Fields
-  reminder_type: ReminderType;
-  one_time_at: string | null;
+  // Scheduler Fields (Simplified)
+  scheduled_at: string | null;           // When it's due/happening (ISO string)
+  remind_before: number | null;          // Minutes before to notify (null = no reminder)
   recurring_config: RecurringConfig | null;
-  next_trigger_at: string | null;
-  last_acknowledged_at: string | null;
 
-  // Deprecated
-  remind_at: string | null;
-  reminder_recurring: any | null;
   bg_color: string;
 
   // Canvas / Visual
@@ -85,7 +79,7 @@ export interface Item {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
-  
+
   // Sync Status
   is_unsynced?: boolean;
 }
@@ -123,30 +117,23 @@ export type ReminderType = 'none' | 'one_time' | 'recurring';
 export interface Task {
   id: string;
   user_id: string;
-  list_id: string | null;                 // Which list this task belongs to
+  list_id: string | null;
   title: string;
   description: string | null;
-  color: string;                          // Card color
+  color: string;
   priority: PriorityLevel;
-  due_at: string | null;                  // ISO string
 
-  // Ultimate Scheduler Fields
-  reminder_type: ReminderType;
-  one_time_at: string | null;
+  // Scheduler Fields (Simplified)
+  scheduled_at: string | null;           // When it's due/happening
+  remind_before: number | null;          // Minutes before to notify
   recurring_config: RecurringConfig | null;
-  next_trigger_at: string | null;
-  last_acknowledged_at: string | null;
 
-  // Legacy fields
-  remind_at: string | null;
-  reminder_recurring: any | null;
-
-  item_ids: string[];                     // Linked items
-  item_completion: Record<string, boolean>; // { itemId: completed }
+  item_ids: string[];
+  item_completion: Record<string, boolean>;
   is_completed: boolean;
   created_at: string;
   updated_at: string;
-  deleted_at: string | null;              // Soft delete timestamp
+  deleted_at: string | null;
 }
 
 // ============ LIST INTERFACE ============
@@ -190,10 +177,9 @@ export interface UploadItem {
 // ============ VIEW TYPES ============
 
 export type ActiveView =
-  | 'today'
-  | 'upcoming'
+  | 'home'
+  | 'scheduled'
   | 'overdue'
-  | 'reminders'
   | 'completed'
   | 'calendar'
   | 'all'
@@ -340,17 +326,10 @@ export function validateItem(item: Partial<Item>): ValidationResult {
   }
 
   // Validate dates if present
-  if (item.due_at !== undefined && item.due_at !== null) {
-    const dueDate = new Date(item.due_at);
-    if (isNaN(dueDate.getTime())) {
-      errors.push({ field: 'due_at', message: 'Invalid due date' });
-    }
-  }
-
-  if (item.remind_at !== undefined && item.remind_at !== null) {
-    const remindDate = new Date(item.remind_at);
-    if (isNaN(remindDate.getTime())) {
-      errors.push({ field: 'remind_at', message: 'Invalid reminder date' });
+  if (item.scheduled_at !== undefined && item.scheduled_at !== null) {
+    const scheduledDate = new Date(item.scheduled_at);
+    if (isNaN(scheduledDate.getTime())) {
+      errors.push({ field: 'scheduled_at', message: 'Invalid scheduled date' });
     }
   }
 
@@ -439,18 +418,12 @@ export function createDefaultItem(
     file_meta: null,
     priority: 'none',
     tags: [],
-    due_at: null,
 
-    // Scheduler Fields
-    reminder_type: 'none',
-    one_time_at: null,
+    // Simplified Scheduler Fields
+    scheduled_at: null,
+    remind_before: null,
     recurring_config: null,
-    next_trigger_at: null,
-    last_acknowledged_at: null,
 
-    // Deprecated but required for now
-    remind_at: null,
-    reminder_recurring: null,
     bg_color: '#FFFFFF',
     is_pinned: false,
     is_archived: false,

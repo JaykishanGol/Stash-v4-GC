@@ -177,7 +177,7 @@ export function TaskDetailView() {
                             <div className="prop-label"><Calendar size={16} /> Due Date</div>
                             <div className="prop-value">
                                 <button className="prop-btn" onClick={() => openScheduler(task.id)}>
-                                    {task.due_at ? new Date(task.due_at).toLocaleDateString() : 'Empty'}
+                                    {task.scheduled_at ? new Date(task.scheduled_at).toLocaleDateString() : 'Empty'}
                                 </button>
                             </div>
                         </div>

@@ -185,16 +185,9 @@ export function ContextMenu() {
             file_meta: null,
             priority: 'none' as const,
             tags: [],
-            due_at: null,
-
-            reminder_type: 'none',
-            one_time_at: null,
+            scheduled_at: null,
+            remind_before: null,
             recurring_config: null,
-            next_trigger_at: null,
-            last_acknowledged_at: null,
-
-            remind_at: null,
-            reminder_recurring: null,
             bg_color: '#FFFBEB',
             is_pinned: false,
             is_completed: false,
@@ -367,13 +360,26 @@ export function ContextMenu() {
     const menuWidth = 280;
     const menuHeight = (item || task) ? 520 : 200;
 
-    const spaceOnRight = window.innerWidth - contextMenu.x;
-    const spaceOnBottom = window.innerHeight - contextMenu.y;
+    // Viewport bounds
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1000;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+    // Calculate position
+    let top = contextMenu.y;
+    let left = contextMenu.x;
+
+    // Flip if overflowing right/bottom
+    if (left + menuWidth > vw) {
+        left = vw - menuWidth - 10;
+    }
+    if (top + menuHeight > vh) {
+        top = vh - menuHeight - 10;
+    }
 
     const style: React.CSSProperties = {
         position: 'fixed',
-        top: spaceOnBottom < menuHeight ? Math.max(10, contextMenu.y - menuHeight) : contextMenu.y,
-        left: spaceOnRight < menuWidth ? Math.max(10, contextMenu.x - menuWidth) : contextMenu.x,
+        top,
+        left,
         zIndex: 9999,
     };
 
@@ -438,7 +444,7 @@ export function ContextMenu() {
                                     <span className="ctx-current">{item.folder_id === FOLDERS_ROOT_ID ? 'Folders' : item.folder_id ? availableFolders.find(f => f.id === item.folder_id)?.title || 'Folder' : 'Root'}</span>
                                     <ChevronRight size={14} className="ctx-arrow" />
                                 </button>
-                                <div className="ctx-submenu" style={{ [spaceOnRight < 500 ? 'right' : 'left']: '100%' }}>
+                                <div className="ctx-submenu" style={{ [(vw - contextMenu.x) < 500 ? 'right' : 'left']: '100%' }}>
                                     <div className="ctx-submenu-header">Move to</div>
                                     <button
                                         className={`ctx-submenu-item ${!item.folder_id ? 'active' : ''}`}
@@ -475,7 +481,7 @@ export function ContextMenu() {
                                     <span>Add to Task</span>
                                     <ChevronRight size={14} className="ctx-arrow" />
                                 </button>
-                                <div className="ctx-submenu" style={{ [spaceOnRight < 500 ? 'right' : 'left']: '100%' }}>
+                                <div className="ctx-submenu" style={{ [(vw - contextMenu.x) < 500 ? 'right' : 'left']: '100%' }}>
                                     <div className="ctx-submenu-header">Add to Task</div>
                                     <button
                                         className="ctx-submenu-item ctx-new-task"
@@ -491,16 +497,9 @@ export function ContextMenu() {
                                                     description: null,
                                                     color: '#FDE68A',
                                                     priority: 'none',
-                                                    due_at: null,
-
-                                                    reminder_type: 'none',
-                                                    one_time_at: null,
+                                                    scheduled_at: null,
+                                                    remind_before: null,
                                                     recurring_config: null,
-                                                    next_trigger_at: null,
-                                                    last_acknowledged_at: null,
-
-                                                    remind_at: null,
-                                                    reminder_recurring: null,
                                                     item_ids: itemsToAdd,
                                                     item_completion: itemsToAdd.reduce((acc, id) => ({ ...acc, [id]: false }), {}),
                                                     is_completed: false,

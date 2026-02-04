@@ -62,37 +62,59 @@ export class GoogleClient {
     private static async getAccessToken(): Promise<string | null> {
         const { data: { session } } = await supabase.auth.getSession();
 
-        if (!session?.provider_token) {
-            console.log('[GoogleClient] No provider token, attempting refresh...');
-            
-            // Attempt 1: Standard Refresh
-            const { data, error } = await supabase.auth.refreshSession();
+        // Try 1: Use existing provider_token from session
+        if (session?.provider_token) {
+            return session.provider_token;
+        }
 
-            if (error) {
-                console.warn('[GoogleClient] Session refresh failed:', error.message);
-                return null;
-            }
+        console.log('[GoogleClient] No provider token in session, attempting refresh...');
 
-            if (!data.session?.provider_token) {
-                // Attempt 2: Check if we SHOULD have one
-                const { data: userSettings } = await supabase
-                    .from('user_settings')
-                    .select('is_google_connected')
-                    .eq('user_id', session?.user?.id)
-                    .single();
-                
-                if (userSettings?.is_google_connected) {
-                    console.warn('[GoogleClient] User expects connection but token is missing. Re-auth required.');
-                    // In a real app, we might trigger a UI toast here
-                }
-                return null;
-            }
+        // Try 2: Standard Supabase session refresh
+        const { data, error } = await supabase.auth.refreshSession();
 
-            console.log('[GoogleClient] Token refreshed successfully');
+        if (!error && data.session?.provider_token) {
+            console.log('[GoogleClient] Token refreshed via Supabase');
             return data.session.provider_token;
         }
 
-        return session.provider_token;
+        // Try 3: Use stored refresh_token to get new access_token
+        console.log('[GoogleClient] Session refresh failed, trying stored refresh token...');
+
+        const userId = session?.user?.id || data?.user?.id;
+        if (!userId) {
+            console.warn('[GoogleClient] No user ID, cannot refresh');
+            return null;
+        }
+
+        // Get stored refresh token
+        const { data: userSettings } = await supabase
+            .from('user_settings')
+            .select('google_refresh_token, is_google_connected')
+            .eq('user_id', userId)
+            .single();
+
+        if (!userSettings?.google_refresh_token) {
+            if (userSettings?.is_google_connected) {
+                console.warn('[GoogleClient] User expects connection but no refresh token. Re-auth required.');
+            }
+            return null;
+        }
+
+        // Exchange refresh token for new access token
+        try {
+            const { refreshGoogleAccessToken } = await import('./googleTokenService');
+            const newAccessToken = await refreshGoogleAccessToken(userSettings.google_refresh_token);
+
+            if (newAccessToken) {
+                console.log('[GoogleClient] Token refreshed via stored refresh_token');
+                return newAccessToken;
+            }
+        } catch (err) {
+            console.error('[GoogleClient] Token refresh failed:', err);
+        }
+
+        console.warn('[GoogleClient] All refresh attempts failed');
+        return null;
     }
 
     private static async request<T>(endpoint: string, method: string = 'GET', body?: any): Promise<T> {
@@ -169,23 +191,38 @@ export class GoogleClient {
 
     // ============ LIST/PULL METHODS (Two-Way Sync) ============
 
-    static async listEvents(calendarId: string = 'primary', options: { timeMin?: string; maxResults?: number } = {}): Promise<GoogleEvent[]> {
+    static async listEvents(calendarId: string = 'primary', options: { timeMin?: string; maxResults?: number; syncToken?: string } = {}): Promise<{ items: GoogleEvent[], nextSyncToken?: string }> {
         const params = new URLSearchParams();
         params.set('maxResults', String(options.maxResults || 250));
         params.set('singleEvents', 'true'); // Expand recurring events
         params.set('orderBy', 'updated');
-        if (options.timeMin) params.set('timeMin', options.timeMin);
+        
+        if (options.syncToken) {
+            params.set('syncToken', options.syncToken);
+            // timeMin is not compatible with syncToken
+        } else if (options.timeMin) {
+            params.set('timeMin', options.timeMin);
+        }
 
-        const res = await this.request<{ items: GoogleEvent[] }>(
+        const res = await this.request<{ items: GoogleEvent[], nextSyncToken?: string }>(
             `/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`
         );
-        return res.items || [];
+        
+        // Handle 410 Gone (Sync Token Invalid) by consumer, but here we just return
+        return { 
+            items: res.items || [], 
+            nextSyncToken: res.nextSyncToken 
+        };
     }
 
-    static async listAllTasks(taskListId: string = '@default'): Promise<GoogleTask[]> {
-        const res = await this.request<{ items: GoogleTask[] }>(
-            `/tasks/v1/lists/${taskListId}/tasks?showCompleted=true&showHidden=true`
-        );
+    static async listAllTasks(taskListId: string = '@default', updatedMin?: string): Promise<GoogleTask[]> {
+        let url = `/tasks/v1/lists/${taskListId}/tasks?showCompleted=true&showHidden=true`;
+        
+        if (updatedMin) {
+            url += `&updatedMin=${updatedMin}`;
+        }
+
+        const res = await this.request<{ items: GoogleTask[] }>(url);
         return res.items || [];
     }
 

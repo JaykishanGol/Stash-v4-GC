@@ -37,13 +37,16 @@ const TYPE_ICONS: Record<string, any> = {
     folder: Folder,
 };
 
-// Date/Time indicator for due dates and reminders
+// Date/Time indicator for scheduled dates and reminders
 function DateTimeIndicator({ target }: { target: any }) {
     const now = new Date();
-    const dueDate = target.due_at ? new Date(target.due_at) : null;
-    const reminderDate = target.next_trigger_at ? new Date(target.next_trigger_at) : (target.remind_at ? new Date(target.remind_at) : null);
+    const scheduledDate = target.scheduled_at ? new Date(target.scheduled_at) : null;
+    // Calculate reminder time from remind_before
+    const reminderDate = scheduledDate && target.remind_before
+        ? new Date(scheduledDate.getTime() - target.remind_before * 60 * 1000)
+        : null;
 
-    if (!dueDate && !reminderDate) return null;
+    if (!scheduledDate && !reminderDate) return null;
 
     const formatDateTime = (date: Date): string => {
         const isToday = date.toDateString() === now.toDateString();
@@ -54,14 +57,14 @@ function DateTimeIndicator({ target }: { target: any }) {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + `, ${timeStr}`;
     };
 
-    const isOverdue = dueDate && dueDate < now && !target.is_completed;
+    const isOverdue = scheduledDate && scheduledDate < now && !target.is_completed;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-            {dueDate && (
+            {scheduledDate && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.7rem', color: isOverdue ? '#EF4444' : '#6B7280', fontWeight: isOverdue ? 600 : 400 }}>
                     <Clock size={12} />
-                    <span>Due: {formatDateTime(dueDate)}</span>
+                    <span>Due: {formatDateTime(scheduledDate)}</span>
                 </div>
             )}
             {reminderDate && (

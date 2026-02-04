@@ -185,6 +185,7 @@ export function ChecklistEditor({ items, onChange, autoFocus }: ChecklistEditorP
                     background: transparent;
                     font-size: 0.95rem;
                     color: var(--text-primary);
+                    caret-color: var(--text-primary); /* Ensure cursor is visible */
                     padding: 4px 0;
                     outline: none;
                     font-family: inherit;

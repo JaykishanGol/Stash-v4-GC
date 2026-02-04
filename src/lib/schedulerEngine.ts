@@ -1,5 +1,11 @@
 import type { RecurringConfig } from './types';
 
+export interface WorkHoursConfig {
+    start: string; // "09:00"
+    end: string;   // "17:00"
+    days: number[]; // [1, 2, 3, 4, 5] (Mon-Fri)
+}
+
 /**
  * Calculates the next trigger date based on recurrence rules.
  * 
@@ -7,11 +13,13 @@ import type { RecurringConfig } from './types';
  * @param lastTriggeredOrCreated The date to calculate FROM.
  *        - For a new schedule: Pass current time (`new Date().toISOString()`)
  *        - For an existing schedule: Pass `last_acknowledged_at`
+ * @param workHours Optional working hours configuration to snap schedule
  * @returns Date object for the next trigger, or null if ends
  */
 export function calculateNextOccurrence(
     config: RecurringConfig,
-    lastTriggeredOrCreated: string | Date
+    lastTriggeredOrCreated: string | Date,
+    workHours?: WorkHoursConfig
 ): Date | null {
     if (!config || !config.frequency) return null;
 
@@ -33,7 +41,7 @@ export function calculateNextOccurrence(
         }
     }
 
-    const potentialDate = new Date(baseDate);
+    let potentialDate = new Date(baseDate);
     // Always start by setting the target time on the base date to ensure fair comparison
     potentialDate.setHours(targetHour, targetMinute, 0, 0);
 
@@ -118,6 +126,11 @@ export function calculateNextOccurrence(
             break;
     }
 
+    // --- WORKING HOURS LOGIC ---
+    if (workHours) {
+        potentialDate = snapToWorkingHours(potentialDate, workHours);
+    }
+
     // Safety: If for some reason the calculated date is <= baseDate (e.g. only time changed in past),
     // and we are creating a NEW one, we might need to bump. 
     // But since we strictly added Interval > 0, it should always be future.
@@ -135,4 +148,45 @@ export function calculateNextOccurrence(
     }
 
     return potentialDate;
+}
+
+/**
+ * Snaps a date to the next available working hour slot
+ */
+function snapToWorkingHours(date: Date, config: WorkHoursConfig): Date {
+    const [startH, startM] = config.start.split(':').map(Number);
+    const [endH, endM] = config.end.split(':').map(Number);
+    
+    // Create new date object to avoid mutating original
+    let d = new Date(date);
+    
+    // 1. Check if it's a working day
+    // If not, advance to next working day at start time
+    let attempts = 0;
+    while (!config.days.includes(d.getDay()) && attempts < 14) { // Limit attempts
+        d.setDate(d.getDate() + 1);
+        d.setHours(startH, startM, 0, 0);
+        attempts++;
+    }
+
+    // 2. Check time boundaries
+    const currentH = d.getHours();
+    const currentM = d.getMinutes();
+    const currentTimeVal = currentH * 60 + currentM;
+    const startTimeVal = startH * 60 + startM;
+    const endTimeVal = endH * 60 + endM;
+
+    if (currentTimeVal < startTimeVal) {
+        // Too early: Snap to start time
+        d.setHours(startH, startM, 0, 0);
+    } else if (currentTimeVal >= endTimeVal) {
+        // Too late: Move to next day (or next working day) at start time
+        d.setDate(d.getDate() + 1);
+        d.setHours(startH, startM, 0, 0);
+        
+        // Check day validity again recursively (in case tomorrow is weekend)
+        return snapToWorkingHours(d, config);
+    }
+
+    return d;
 }

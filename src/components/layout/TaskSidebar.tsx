@@ -8,10 +8,10 @@ export function TaskSidebar() {
 
     const completedTasks = tasks.filter(t => t.is_completed);
     const pendingTasks = tasks.filter(t => !t.is_completed).sort((a, b) => {
-        // Sort by due date if exists, otherwise created_at
-        if (a.due_at && b.due_at) return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
-        if (a.due_at) return -1;
-        if (b.due_at) return 1;
+        // Sort by scheduled_at if exists, otherwise created_at
+        if (a.scheduled_at && b.scheduled_at) return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
+        if (a.scheduled_at) return -1;
+        if (b.scheduled_at) return 1;
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
@@ -25,16 +25,9 @@ export function TaskSidebar() {
             description: null,
             color: '#F59E0B',
             priority: 'none',
-            due_at: null,
-
-            reminder_type: 'none',
-            one_time_at: null,
+            scheduled_at: null,
+            remind_before: null,
             recurring_config: null,
-            next_trigger_at: null,
-            last_acknowledged_at: null,
-
-            remind_at: null,
-            reminder_recurring: null,
             item_ids: [],
             item_completion: {},
             is_completed: false,
@@ -81,10 +74,10 @@ export function TaskSidebar() {
                         </button>
                         <div className="task-content">
                             <span className="task-title">{task.title}</span>
-                            {task.due_at && (
+                            {task.scheduled_at && (
                                 <span className="task-date">
                                     <Calendar size={12} />
-                                    {new Date(task.due_at).toLocaleDateString()}
+                                    {new Date(task.scheduled_at).toLocaleDateString()}
                                 </span>
                             )}
                         </div>

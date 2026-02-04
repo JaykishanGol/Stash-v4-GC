@@ -25,7 +25,7 @@ export const useAppStore = create<AppState>()(
             ...createDataSlice(set, get, api),
 
             // ============ COMPUTED IMPLEMENTATIONS ============
-            
+
             getFilteredItems: (overrideListId?: string | null) => {
                 const state = get();
                 // Filter out trashed items by default (they are in trashedItems)
@@ -65,16 +65,16 @@ export const useAppStore = create<AppState>()(
                 else {
                     switch (state.activeView) {
                         case 'notes':
-                            filtered = filtered.filter(i => i.type === 'note' && !i.folder_id);
+                            filtered = filtered.filter(i => i.type === 'note');
                             break;
                         case 'links':
-                            filtered = filtered.filter(i => i.type === 'link' && !i.folder_id);
+                            filtered = filtered.filter(i => i.type === 'link');
                             break;
                         case 'files':
-                            filtered = filtered.filter(i => i.type === 'file' && !i.folder_id);
+                            filtered = filtered.filter(i => i.type === 'file');
                             break;
                         case 'images':
-                            filtered = filtered.filter(i => i.type === 'image' && !i.folder_id);
+                            filtered = filtered.filter(i => i.type === 'image');
                             break;
                         case 'folders':
                             // Show: folder items + items moved to folders section root
@@ -82,28 +82,28 @@ export const useAppStore = create<AppState>()(
                                 i.type === 'folder' || i.folder_id === FOLDERS_ROOT_ID
                             );
                             break;
-                        case 'reminders':
-                            filtered = filtered.filter(i => i.remind_at !== null || i.next_trigger_at !== null);
-                            break;
-                        case 'upcoming': {
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
-                            filtered = filtered.filter(i => i.due_at && new Date(i.due_at) >= today);
-                            break;
-                        }
                         case 'overdue': {
                             const today = new Date();
                             today.setHours(0, 0, 0, 0);
-                            filtered = filtered.filter(i => i.due_at && !i.is_completed && new Date(i.due_at) < today);
+                            filtered = filtered.filter(i => i.scheduled_at && !i.is_completed && new Date(i.scheduled_at) < today);
                             break;
                         }
                         case 'completed':
                             filtered = filtered.filter(i => i.is_completed === true);
                             break;
-                        case 'all':
-                        case 'today':
-                            // Show root items only
+                        case 'home':
+                            // Home dashboard: Show root items only (not in folders)
                             filtered = filtered.filter(i => i.folder_id === null);
+                            break;
+                        case 'all':
+                            // All Items: Show everything (no additional filter)
+                            break;
+                        case 'scheduled':
+                            // Show all scheduled items
+                            filtered = filtered.filter(i => i.scheduled_at && !i.is_completed);
+                            break;
+                        default:
+                            // For any unhandled view, show all items
                             break;
                     }
                 }
@@ -181,41 +181,15 @@ export const useAppStore = create<AppState>()(
 
                 // View-based filtering
                 switch (state.activeView) {
-                    case 'reminders':
-                        filtered = filtered.filter(t => t.remind_at !== null || t.next_trigger_at !== null);
-                        break;
-                    case 'upcoming': {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        filtered = filtered.filter(t => t.due_at && new Date(t.due_at) >= today);
-                        break;
-                    }
                     case 'overdue': {
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
-                        filtered = filtered.filter(t => t.due_at && !t.is_completed && new Date(t.due_at) < today);
+                        filtered = filtered.filter(t => t.scheduled_at && !t.is_completed && new Date(t.scheduled_at) < today);
                         break;
                     }
-                    case 'today': {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        const tomorrow = new Date(today);
-                        tomorrow.setDate(tomorrow.getDate() + 1);
-
-                        filtered = filtered.filter(t => {
-                            // Check Due Date
-                            if (t.due_at) {
-                                const d = new Date(t.due_at);
-                                if (d >= today && d < tomorrow) return true;
-                                if (d < today && !t.is_completed) return true; // Include overdue
-                            }
-                            // Check Reminders
-                            if (t.remind_at || t.next_trigger_at) {
-                                const r = t.next_trigger_at ? new Date(t.next_trigger_at) : new Date(t.remind_at!);
-                                if (r >= today && r < tomorrow) return true;
-                            }
-                            return false;
-                        });
+                    case 'scheduled': {
+                        // Show all tasks with scheduled_at
+                        filtered = filtered.filter(t => t.scheduled_at);
                         break;
                     }
                     case 'tasks':
@@ -290,14 +264,14 @@ export const useAppStore = create<AppState>()(
                         .eq('user_id', user.id);
 
                     const allItems = (itemsData || []) as Item[];
-                    
+
                     // SMART MERGE: Preserve local items that haven't synced yet
                     const { items: localItems } = get();
                     const unsyncedLocalItems = localItems.filter(i => i.is_unsynced);
-                    
+
                     // Start with server items
                     const mergedItems = [...allItems];
-                    
+
                     // Add local items IF they are not already in the server list
                     // (If they ARE in the server list, the server version wins and clears the flag)
                     unsyncedLocalItems.forEach(localItem => {
@@ -306,7 +280,7 @@ export const useAppStore = create<AppState>()(
                             mergedItems.unshift(localItem);
                         }
                     });
-                    
+
                     const activeItems = mergedItems.filter((i: any) => !i.deleted_at);
                     const trashedItems = mergedItems.filter((i: any) => i.deleted_at);
 

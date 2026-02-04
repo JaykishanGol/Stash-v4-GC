@@ -250,14 +250,14 @@ export function InfoPanel() {
                     </div>
 
                     {/* Due Date (if set) */}
-                    {item.due_at && (
+                    {item.scheduled_at && (
                         <div className="info-section">
                             <label className="info-label">
                                 <Calendar size={14} />
-                                Due
+                                Scheduled
                             </label>
                             <div className="info-value">
-                                {formatDate(item.due_at)} at {formatTime(item.due_at)}
+                                {formatDate(item.scheduled_at)} at {formatTime(item.scheduled_at)}
                             </div>
                         </div>
                     )}

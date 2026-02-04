@@ -134,6 +134,7 @@ export function RichTextEditor({ content, onChange, placeholder = 'Write your no
                     font-size: 0.9rem;
                     line-height: 1.6;
                     color: var(--text-primary);
+                    caret-color: var(--text-primary); /* Ensure cursor is visible */
                     overflow-y: auto;
                 }
                 .rich-text-editor-content p {

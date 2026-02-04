@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Check, Folder, Palette, AlertCircle, List as ListIcon, Calendar } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { supabase } from '../../lib/supabase'; // Import supabase
 import type { Item, PriorityLevel, CardColor } from '../../lib/types';
 import { CARD_COLORS } from '../../lib/types';
 import { SchedulerContent } from './SchedulerModal';
@@ -52,25 +53,54 @@ export function ShareIntentModal() {
             ...(withTriage ? scheduleUpdates : {}),
 
             // Ensure defaults if not set by scheduler
-            due_at: (withTriage && scheduleUpdates.due_at) || null,
-            reminder_type: (withTriage && scheduleUpdates.reminder_type) || 'none',
+            scheduled_at: (withTriage && scheduleUpdates.scheduled_at) || null,
+            remind_before: (withTriage && scheduleUpdates.remind_before) || null,
             recurring_config: (withTriage && scheduleUpdates.recurring_config) || null,
-            next_trigger_at: (withTriage && scheduleUpdates.next_trigger_at) || null,
         };
 
-        // --- IMAGE CORRUPTION FIX ---
+        // --- SUPABASE STORAGE UPLOAD ---
         if ((finalItem.type === 'file' || finalItem.type === 'image') && finalItem.file_meta?.path.startsWith('blob:')) {
             try {
+                // 1. Fetch the blob from the local URL
                 const response = await fetch(finalItem.file_meta.path);
                 const blob = await response.blob();
-                const base64 = await new Promise<string>((resolve) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result as string);
-                    reader.readAsDataURL(blob);
-                });
-                if (finalItem.file_meta) finalItem.file_meta.path = base64;
+
+                // 2. Upload to 'stash_uploads' bucket
+                // Path format: user_id/timestamp_filename
+                const userId = finalItem.user_id;
+                const timestamp = Date.now();
+                const sanitizedName = finalItem.file_meta.originalName?.replace(/[^a-zA-Z0-9.-]/g, '_') || 'file';
+                const filePath = `${userId}/${timestamp}_${sanitizedName}`;
+
+                const { data: _data, error } = await supabase
+                    .storage
+                    .from('stash_uploads')
+                    .upload(filePath, blob, {
+                        cacheControl: '3600',
+                        upsert: false
+                    });
+
+                if (error) throw error;
+
+                // 3. Get Public URL
+                const { data: urlData } = supabase
+                    .storage
+                    .from('stash_uploads')
+                    .getPublicUrl(filePath);
+
+                // 4. Update item with remote URL
+                if (finalItem.file_meta) {
+                    finalItem.file_meta.path = urlData.publicUrl;
+                }
+
+                // (Optional) Revoke the local blob URL to free memory
+                URL.revokeObjectURL(pendingShareItem.file_meta!.path);
+
             } catch (e) {
-                console.error("Failed to process file blob:", e);
+                console.error("Failed to upload file:", e);
+                alert("Upload failed. Saving offline version (might not sync).");
+                // Fallback: Leave as blob (will fail sync) or try base64 as backup? 
+                // For now, we alert.
             }
         }
 
@@ -119,9 +149,9 @@ export function ShareIntentModal() {
 
     // Helper to format schedule text
     const getScheduleText = () => {
-        if (scheduleUpdates.due_at) return new Date(scheduleUpdates.due_at).toLocaleDateString();
-        if (scheduleUpdates.reminder_type === 'recurring') return 'Recurring';
-        if (scheduleUpdates.reminder_type === 'one_time') return 'Reminder Set';
+        if (scheduleUpdates.scheduled_at) return new Date(scheduleUpdates.scheduled_at).toLocaleDateString();
+        if (scheduleUpdates.recurring_config) return 'Recurring';
+        if (scheduleUpdates.remind_before !== null) return 'Reminder Set';
         return 'Schedule';
     };
 
@@ -199,7 +229,7 @@ export function ShareIntentModal() {
                         <div className="triage-row">
                             <label><Calendar size={14} /> Schedule</label>
                             <button
-                                className={`triage-btn ${scheduleUpdates.due_at || scheduleUpdates.reminder_type !== 'none' ? 'active' : ''}`}
+                                className={`triage-btn ${scheduleUpdates.scheduled_at || scheduleUpdates.remind_before !== null ? 'active' : ''}`}
                                 onClick={() => setShowScheduler(true)}
                             >
                                 <Calendar size={16} />

@@ -39,9 +39,11 @@ export function TaskCard({ task }: TaskCardProps) {
 
     // Date indicators
     const now = new Date();
-    const dueDate = task.due_at ? new Date(task.due_at) : null;
-    const reminderDate = task.next_trigger_at ? new Date(task.next_trigger_at) : (task.remind_at ? new Date(task.remind_at) : null);
-    const isOverdue = dueDate && dueDate < now && !task.is_completed;
+    const scheduledDate = task.scheduled_at ? new Date(task.scheduled_at) : null;
+    const reminderDate = scheduledDate && task.remind_before
+        ? new Date(scheduledDate.getTime() - task.remind_before * 60 * 1000)
+        : null;
+    const isOverdue = scheduledDate && scheduledDate < now && !task.is_completed;
 
     const formatDateTime = (date: Date) => {
         const isToday = date.toDateString() === now.toDateString();
@@ -89,9 +91,9 @@ export function TaskCard({ task }: TaskCardProps) {
             {/* Meta Row */}
             <div className="task-meta-row">
                 <div className="task-dates">
-                    {dueDate && (
+                    {scheduledDate && (
                         <span className={`task-date ${isOverdue ? 'overdue' : ''}`}>
-                            <Calendar size={12} /> {formatDateTime(dueDate)}
+                            <Calendar size={12} /> {formatDateTime(scheduledDate)}
                         </span>
                     )}
                     {reminderDate && (

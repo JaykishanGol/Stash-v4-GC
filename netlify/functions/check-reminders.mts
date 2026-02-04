@@ -33,101 +33,27 @@ export default async (req, context) => {
         const now = new Date().toISOString();
         console.log(`[check-reminders] Checking for reminders due before: ${now}`);
 
-        // Debug: Check total items count first
-        const { count: totalItems, error: countError } = await supabase
-            .from('items')
-            .select('*', { count: 'exact', head: true });
-        console.log(`[check-reminders] Total items in DB: ${totalItems || 0}`);
-        if (countError) {
-            console.error('[check-reminders] Error counting items:', countError);
+        // Call the optimized RPC function
+        const { data: allDue, error: rpcError } = await supabase
+            .rpc('get_due_reminders', { check_time: now });
+
+        if (rpcError) {
+            console.error('[check-reminders] RPC Error:', rpcError);
+            throw rpcError;
         }
 
-        // Debug: Check a sample item to see its columns
-        const { data: sampleItem, error: sampleError } = await supabase
-            .from('items')
-            .select('id, title, reminder_type, one_time_at, next_trigger_at')
-            .limit(1)
-            .single();
-        if (sampleError && sampleError.code !== 'PGRST116') {
-            console.error('[check-reminders] Error fetching sample:', sampleError);
-        } else if (sampleItem) {
-            console.log(`[check-reminders] Sample item: "${sampleItem.title}" | reminder_type: ${sampleItem.reminder_type} | next_trigger_at: ${sampleItem.next_trigger_at}`);
-        }
+        console.log(`[check-reminders] Found ${allDue?.length || 0} due reminders via RPC`);
 
-        // Debug: Check total items/tasks with any next_trigger_at set
-        const { data: allReminders, count: reminderCount } = await supabase
-            .from('items')
-            .select('id, title, next_trigger_at', { count: 'exact' })
-            .not('next_trigger_at', 'is', null);
-        console.log(`[check-reminders] Total items with reminders set: ${reminderCount || 0}`);
-        if (allReminders && allReminders.length > 0) {
-            allReminders.slice(0, 5).forEach(r => {
-                console.log(`[check-reminders] Scheduled: "${r.title}" at ${r.next_trigger_at}`);
-            });
-        }
-
-        // Query items with due reminders
-        // Note: We can't compare two columns (last_ack < next_trigger) easily in Supabase JS
-        // So we fetch all due items and filter in memory
-        const { data: dueItems, error: itemsError } = await supabase
-            .from('items')
-            .select('id, user_id, title, next_trigger_at, last_acknowledged_at')
-            .not('next_trigger_at', 'is', null)
-            .lte('next_trigger_at', now);
-
-        if (itemsError) {
-            console.error('[check-reminders] Error querying items:', itemsError);
-        } else {
-            console.log(`[check-reminders] Raw items with next_trigger_at <= now: ${dueItems?.length || 0}`);
-            if (dueItems && dueItems.length > 0) {
-                dueItems.forEach(item => {
-                    console.log(`[check-reminders] Item: "${item.title}" | next_trigger_at: ${item.next_trigger_at} | last_ack: ${item.last_acknowledged_at}`);
-                });
-            }
-        }
-
-        // Query tasks with due reminders
-        const { data: dueTasks, error: tasksError } = await supabase
-            .from('tasks')
-            .select('id, user_id, title, next_trigger_at, last_acknowledged_at')
-            .not('next_trigger_at', 'is', null)
-            .lte('next_trigger_at', now);
-
-        if (tasksError) {
-            console.error('[check-reminders] Error querying tasks:', tasksError);
-        } else {
-            console.log(`[check-reminders] Raw tasks with next_trigger_at <= now: ${dueTasks?.length || 0}`);
-            if (dueTasks && dueTasks.length > 0) {
-                dueTasks.forEach(task => {
-                    console.log(`[check-reminders] Task: "${task.title}" | next_trigger_at: ${task.next_trigger_at} | last_ack: ${task.last_acknowledged_at}`);
-                });
-            }
-        }
-
-        let allDue = [...(dueItems || []), ...(dueTasks || [])];
-
-        // Filter out items that have already been acknowledged for their current trigger time
-        allDue = allDue.filter(item => {
-            if (!item.last_acknowledged_at) return true; // Never acknowledged
-            return new Date(item.last_acknowledged_at) < new Date(item.next_trigger_at);
-        });
-
-        console.log(`[check-reminders] Found ${allDue.length} due reminders (after filtering ack)`);
-
-        // Debug: Check total push subscriptions in database
-        const { data: allSubs, count: subCount } = await supabase
-            .from('push_subscriptions')
-            .select('user_id, endpoint', { count: 'exact' });
-        console.log(`[check-reminders] Total push subscriptions in DB: ${subCount || 0}`);
-        if (allSubs && allSubs.length > 0) {
-            allSubs.forEach(s => {
-                console.log(`[check-reminders] Subscription for user ${s.user_id}: ...${s.endpoint.slice(-30)}`);
+        // Debug: Log the first few items (securely)
+        if (allDue && allDue.length > 0) {
+            allDue.slice(0, 3).forEach((item: any) => {
+                console.log(`[check-reminders] Processing ${item.type} ID: ${item.id} | next_trigger_at: ${item.next_trigger_at}`);
             });
         }
 
         // Group by user_id
-        const byUser = {};
-        for (const item of allDue) {
+        const byUser: Record<string, any[]> = {};
+        for (const item of (allDue || [])) {
             if (!byUser[item.user_id]) byUser[item.user_id] = [];
             byUser[item.user_id].push(item);
         }

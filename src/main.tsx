@@ -2,6 +2,13 @@ import React from 'react';
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
+import { initErrorTracking, captureException } from './lib/errorHandler.ts'
+
+// Initialize error tracking (Sentry-compatible)
+// Set VITE_SENTRY_DSN in .env to enable
+initErrorTracking({
+  environment: import.meta.env.MODE,
+});
 
 class ErrorBoundary extends React.Component<any, any> {
   constructor(props: any) {
@@ -11,6 +18,14 @@ class ErrorBoundary extends React.Component<any, any> {
 
   static getDerivedStateFromError(error: any) {
     return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Report to error tracking
+    captureException(error, {
+      componentStack: errorInfo.componentStack,
+      source: 'ErrorBoundary',
+    });
   }
 
   render() {

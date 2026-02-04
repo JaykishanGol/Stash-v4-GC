@@ -20,7 +20,7 @@ export function MobileNav() {
     return (
         <nav className={`mobile-nav ${isHidden ? 'nav-hidden' : ''}`}>
             <button
-                className={`nav-tab ${activeView === 'today' ? 'active' : ''}`}
+                className={`nav-tab ${activeView === 'home' ? 'active' : ''}`}
                 onClick={() => setLocation('/')}
             >
                 <Home size={22} />
@@ -28,11 +28,11 @@ export function MobileNav() {
             </button>
 
             <button
-                className={`nav-tab ${activeView === 'upcoming' ? 'active' : ''}`}
-                onClick={() => setLocation('/upcoming')}
+                className={`nav-tab ${activeView === 'calendar' ? 'active' : ''}`}
+                onClick={() => setLocation('/calendar')}
             >
                 <Calendar size={22} />
-                <span>Agenda</span>
+                <span>Calendar</span>
             </button>
 
             <div className="add-tab-wrapper">
@@ -67,18 +67,21 @@ export function MobileNav() {
                     bottom: 0; /* Flush to bottom */
                     left: 0;
                     right: 0;
-                    height: 72px;
+                    width: 100%;
+                    height: calc(64px + env(safe-area-inset-bottom));
+                    margin: 0;
                     background: rgba(255, 255, 255, 0.95);
                     backdrop-filter: blur(20px);
                     -webkit-backdrop-filter: blur(20px);
-                    border: 1px solid rgba(0, 0, 0, 0.05);
+                    border-top: 1px solid rgba(0, 0, 0, 0.05);
                     /* Full Capsule Shape */
                     border-radius: 0; /* No border radius when flush to bottom */ 
                     z-index: 1000;
                     justify-content: space-between;
                     align-items: center; 
-                    padding: 0 16px; 
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+                    padding: 0 16px env(safe-area-inset-bottom) 16px; 
+                    box-sizing: border-box;
+                    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
                     transition: transform 0.4s cubic-bezier(0.2, 0, 0, 1);
                 }
 
@@ -125,8 +128,8 @@ export function MobileNav() {
                 }
 
                 .nav-tab.active svg {
-                    transform: translateY(-2px);
-                    filter: drop-shadow(0 4px 6px rgba(245, 158, 11, 0.3));
+                    transform: scale(1.1);
+                    filter: drop-shadow(0 2px 4px rgba(245, 158, 11, 0.3));
                 }
                 
                 .nav-tab:active svg {

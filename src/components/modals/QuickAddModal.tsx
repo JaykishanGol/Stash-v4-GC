@@ -83,8 +83,8 @@ export function QuickAddModal() {
                 setTitle(editingItem.title);
                 setSelectedColor(getColorKey(editingItem.bg_color));
                 setPriority(editingItem.priority);
-                if (editingItem.due_at) {
-                    setDueDate(editingItem.due_at.split('T')[0]);
+                if (editingItem.scheduled_at) {
+                    setDueDate(editingItem.scheduled_at.split('T')[0]);
                 }
                 if (editingItem.type === 'note') {
                     // Type assertion to NoteContent
@@ -206,7 +206,7 @@ export function QuickAddModal() {
                 title: title || 'Untitled',
                 bg_color: CARD_COLORS[selectedColor],
                 priority,
-                due_at: dueDate ? new Date(dueDate).toISOString() : null,
+                scheduled_at: dueDate ? new Date(dueDate).toISOString() : null,
             };
 
             if (quickAddType === 'note') {
@@ -241,17 +241,9 @@ export function QuickAddModal() {
                 file_meta: null,
                 priority,
                 tags: [],
-                due_at: dueDate ? new Date(dueDate).toISOString() : null,
-                remind_at: reminderDate ? new Date(reminderDate).toISOString() : null,
-                reminder_recurring: null,
-
-                // Initialize new scheduler fields
-                reminder_type: 'none',
-                one_time_at: null,
+                scheduled_at: dueDate ? new Date(dueDate).toISOString() : null,
+                remind_before: reminderDate ? 60 : null, // Default 60 min if reminder set
                 recurring_config: null,
-                next_trigger_at: null,
-                last_acknowledged_at: null,
-
                 bg_color: CARD_COLORS[selectedColor],
                 is_pinned: false,
                 is_archived: false,
@@ -312,8 +304,7 @@ export function QuickAddModal() {
                             item={{
                                 id: 'draft',
                                 title: title || 'New Item',
-                                due_at: dueDate ? new Date(dueDate).toISOString() : null,
-                                reminder_type: 'none',
+                                scheduled_at: dueDate ? new Date(dueDate).toISOString() : null,
                                 ...schedulerUpdates
                             }}
                             isTaskType={false}
@@ -321,7 +312,7 @@ export function QuickAddModal() {
                             onSave={(updates) => {
                                 setSchedulerUpdates(prev => ({ ...prev, ...updates }));
                                 // Also sync back basic fields to UI if updated
-                                if (updates.due_at) setDueDate(updates.due_at.split('T')[0]);
+                                if (updates.scheduled_at) setDueDate(updates.scheduled_at.split('T')[0]);
                                 setIsLocalSchedulerOpen(false);
                             }}
                         />
@@ -549,15 +540,9 @@ export function QuickAddModal() {
                                                             },
                                                             priority: 'none',
                                                             tags: [],
-                                                            due_at: null,
-                                                            remind_at: null,
-                                                            reminder_recurring: null,
-                                                            // New fields
-                                                            reminder_type: 'none',
-                                                            one_time_at: null,
+                                                            scheduled_at: null,
+                                                            remind_before: null,
                                                             recurring_config: null,
-                                                            next_trigger_at: null,
-                                                            last_acknowledged_at: null,
 
                                                             bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
                                                             is_pinned: false,
@@ -634,15 +619,9 @@ export function QuickAddModal() {
                                                             file_meta: null,
                                                             priority: 'none',
                                                             tags: [],
-                                                            due_at: null,
-                                                            remind_at: null,
-                                                            reminder_recurring: null,
-                                                            // New fields
-                                                            reminder_type: 'none',
-                                                            one_time_at: null,
+                                                            scheduled_at: null,
+                                                            remind_before: null,
                                                             recurring_config: null,
-                                                            next_trigger_at: null,
-                                                            last_acknowledged_at: null,
 
                                                             bg_color: '#FFFBEB', // Default folder color
                                                             is_pinned: false,
@@ -692,15 +671,9 @@ export function QuickAddModal() {
                                                                     },
                                                                     priority: 'none',
                                                                     tags: [],
-                                                                    due_at: null,
-                                                                    remind_at: null,
-                                                                    reminder_recurring: null,
-                                                                    // New fields
-                                                                    reminder_type: 'none',
-                                                                    one_time_at: null,
+                                                                    scheduled_at: null,
+                                                                    remind_before: null,
                                                                     recurring_config: null,
-                                                                    next_trigger_at: null,
-                                                                    last_acknowledged_at: null,
 
                                                                     bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
                                                                     is_pinned: false,
@@ -774,15 +747,9 @@ export function QuickAddModal() {
                                                                     },
                                                                     priority: 'none',
                                                                     tags: [],
-                                                                    due_at: null,
-                                                                    remind_at: null,
-                                                                    reminder_recurring: null,
-                                                                    // New fields
-                                                                    reminder_type: 'none',
-                                                                    one_time_at: null,
+                                                                    scheduled_at: null,
+                                                                    remind_before: null,
                                                                     recurring_config: null,
-                                                                    next_trigger_at: null,
-                                                                    last_acknowledged_at: null,
 
                                                                     bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
                                                                     is_pinned: false,

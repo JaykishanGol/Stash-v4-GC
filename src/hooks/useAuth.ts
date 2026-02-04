@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { onAuthStateChange, getSession, isSupabaseConfigured } from '../lib/supabase';
 import { useAppStore } from '../store/useAppStore';
+import { storeGoogleRefreshToken } from '../lib/googleTokenService';
 
 /**
  * Robust Auth Hook
@@ -14,7 +15,7 @@ export function useAuth() {
     const { setUser, loadUserData, user } = useAppStore();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
-    
+
     // Track the last processed user ID to prevent redundant re-fetches
     const lastUserIdRef = useRef<string | null>(null);
 
@@ -40,13 +41,20 @@ export function useAuth() {
                 if (isMounted && session?.user) {
                     const userId = session.user.id;
                     const userEmail = session.user.email || '';
-                    
+
                     setUser({ id: userId, email: userEmail });
-                    
+
                     // Only load data if this is a NEW user session or first load
                     if (lastUserIdRef.current !== userId) {
                         console.log('[Auth] New session found, loading data...');
                         lastUserIdRef.current = userId;
+
+                        // Store Google refresh token if present (OAuth callback)
+                        if (session.provider_refresh_token) {
+                            console.log('[Auth] Storing Google refresh token...');
+                            storeGoogleRefreshToken(session.provider_refresh_token);
+                        }
+
                         await loadUserData();
                     } else {
                         console.log('[Auth] Session restored (Data already loaded)');
@@ -67,7 +75,7 @@ export function useAuth() {
             if (!isMounted) return;
 
             const newUserId = updatedUser?.id || null;
-            
+
             // LOGIC FIX: Only trigger actions if the user IDENTITY actually changed.
             // Ignore "TOKEN_REFRESHED" events where the user ID stays the same.
             if (newUserId !== lastUserIdRef.current) {

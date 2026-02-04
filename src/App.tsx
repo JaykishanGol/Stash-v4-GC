@@ -9,8 +9,9 @@ import { AuthModal } from './components/auth/AuthModal';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { ToastListener } from './components/ui/ToastListener';
 import { BulkActionsBar } from './components/ui/BulkActionsBar';
-import { MobileNav } from './components/layout/MobileNav'; // Import MobileNav
-import { NotificationCenter } from './components/ui/NotificationCenter'; // Import NotificationCenter
+import { AppErrorBoundary } from './components/ui/AppErrorBoundary';
+import { MobileNav } from './components/layout/MobileNav';
+import { NotificationCenter } from './components/ui/NotificationCenter';
 import { ShareIntentModal } from './components/modals/ShareIntentModal';
 import { DragDropOverlay } from './components/capture/CaptureEngine';
 import { useSmartPaste } from './hooks/useSmartPaste';
@@ -27,12 +28,12 @@ import './index.css';
 function App() {
   // Initialize auth and capture hooks
   const { isLoading } = useAuth();
-  const { 
-    isAuthModalOpen, 
-    closeAuthModal, 
-    loadUserData, 
-    user, 
-    isHeaderVisible, 
+  const {
+    isAuthModalOpen,
+    closeAuthModal,
+    loadUserData,
+    user,
+    isHeaderVisible,
     isQuickAddOpen,
     fetchNotifications,
     setPendingShareItem,
@@ -77,8 +78,8 @@ function App() {
             console.log('Share processed into item:', newItem);
             setPendingShareItem(newItem);
           } else {
-             console.error('Failed to process share data');
-             addNotification('error', 'Import Failed', 'Could not process shared content');
+            console.error('Failed to process share data');
+            addNotification('error', 'Import Failed', 'Could not process shared content');
           }
         }
       });
@@ -86,7 +87,7 @@ function App() {
       url.searchParams.delete('share_target');
       window.history.replaceState({}, '', url.toString());
     }
-  }, [user, setPendingShareItem, addNotification]); 
+  }, [user, setPendingShareItem, addNotification]);
 
   // Auto-close sidebar on mobile
   useEffect(() => {
@@ -121,40 +122,42 @@ function App() {
   }
 
   return (
-    <Router>
-      <ToastProvider>
-        <ToastListener />
-        <Layout />
-        <QuickAddModal />
-        <SchedulerModal />
-        <InfoPanel />
-        <FilePreviewModal />
-        <ShareIntentModal />
-        <BulkActionsBar />
-        <DragDropOverlay />
-        <MobileNav />
+    <AppErrorBoundary>
+      <Router>
+        <ToastProvider>
+          <ToastListener />
+          <Layout />
+          <QuickAddModal />
+          <SchedulerModal />
+          <InfoPanel />
+          <FilePreviewModal />
+          <ShareIntentModal />
+          <BulkActionsBar />
+          <DragDropOverlay />
+          <MobileNav />
 
-        {/* Mobile Fixed Notification Bell - Forced Positioning */}
-        <div
-          className={`mobile-bell-fixed ${(!isHeaderVisible || isQuickAddOpen) ? 'bell-hidden' : ''}`}
-          style={{
-            position: 'fixed',
-            top: '16px',
-            right: '16px',
-            zIndex: 9999,
-            margin: 0
-          }}
-        >
-          <NotificationCenter />
-        </div>
+          {/* Mobile Fixed Notification Bell - Forced Positioning */}
+          <div
+            className={`mobile-bell-fixed ${(!isHeaderVisible || isQuickAddOpen) ? 'bell-hidden' : ''}`}
+            style={{
+              position: 'fixed',
+              top: '16px',
+              right: '16px',
+              zIndex: 9999,
+              margin: 0
+            }}
+          >
+            <NotificationCenter />
+          </div>
 
-        <AuthModal
-          isOpen={isAuthModalOpen}
-          onClose={closeAuthModal}
-          onSuccess={loadUserData}
-        />
-      </ToastProvider>
-    </Router>
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={closeAuthModal}
+            onSuccess={loadUserData}
+          />
+        </ToastProvider>
+      </Router>
+    </AppErrorBoundary>
   );
 }
 

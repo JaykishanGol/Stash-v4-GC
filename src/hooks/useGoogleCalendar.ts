@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameDay } from 'date-fns';
+import { startOfMonth, startOfWeek, isSameDay } from 'date-fns';
 import { useAppStore } from '../store/useAppStore';
 import { GoogleClient, type GoogleEvent, type GoogleTask } from '../lib/googleClient';
 import { supabase } from '../lib/supabase';
@@ -31,7 +31,7 @@ export function useGoogleCalendar(viewDate: Date) {
 
         try {
             const { data: { session } } = await supabase.auth.getSession();
-            
+
             if (!session?.provider_token) {
                 setGoogleEvents([]);
                 setGoogleTasks([]);
@@ -41,9 +41,9 @@ export function useGoogleCalendar(viewDate: Date) {
             // Calculate range for current view (Month view buffer)
             const monthStart = startOfMonth(viewDate);
             const start = startOfWeek(monthStart).toISOString();
-            
+
             // Fetch Events (Ghost Events)
-            const events = await GoogleClient.listEvents('primary', {
+            const { items: events } = await GoogleClient.listEvents('primary', {
                 timeMin: start,
                 maxResults: 250
             });
@@ -76,7 +76,7 @@ export function useGoogleCalendar(viewDate: Date) {
         // 1. Local Items
         items.forEach(item => {
             if (item.deleted_at) return;
-            const dateStr = item.next_trigger_at || item.due_at || item.one_time_at;
+            const dateStr = item.scheduled_at;
             if (dateStr && isSameDay(new Date(dateStr), date)) {
                 entries.push({
                     id: item.id,
@@ -94,7 +94,7 @@ export function useGoogleCalendar(viewDate: Date) {
         // 2. Local Tasks
         tasks.forEach(task => {
             if (task.deleted_at) return;
-            const dateStr = task.next_trigger_at || task.due_at || task.one_time_at;
+            const dateStr = task.scheduled_at;
             if (dateStr && isSameDay(new Date(dateStr), date)) {
                 entries.push({
                     id: task.id,
@@ -112,7 +112,7 @@ export function useGoogleCalendar(viewDate: Date) {
         googleEvents.forEach(event => {
             const startStr = event.start.dateTime || event.start.date;
             const endStr = event.end.dateTime || event.end.date;
-            
+
             if (!startStr) return;
 
             const eventStart = new Date(startStr);
@@ -139,7 +139,7 @@ export function useGoogleCalendar(viewDate: Date) {
         googleTasks.forEach(task => {
             if (!task.due) return;
             const taskDate = new Date(task.due);
-            
+
             if (isSameDay(taskDate, date)) {
                 entries.push({
                     id: task.id,

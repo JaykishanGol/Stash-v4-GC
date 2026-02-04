@@ -1,6 +1,5 @@
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isSameDay, isToday } from 'date-fns';
 import { useAppStore } from '../../store/useAppStore';
-import { CheckSquare, Calendar as CalendarIcon, File, Folder, Link, Image } from 'lucide-react';
 import type { CalendarEntry } from '../../hooks/useGoogleCalendar';
 import { GoogleSyncService } from '../../lib/googleSyncService';
 
@@ -31,29 +30,26 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
             newDate.setHours(12, 0, 0, 0);
             const isoDate = newDate.toISOString();
             const updates = {
-                due_at: isoDate,
-                next_trigger_at: isoDate,
-                reminder_type: 'one_time' as const,
-                one_time_at: isoDate
+                scheduled_at: isoDate,
             };
 
             if (itemType === 'task') {
                 updateTask(itemId, updates);
-                 // Seamless Sync
                 const { tasks } = useAppStore.getState();
-                const updatedTask = { ...tasks.find(t => t.id === itemId), ...updates };
-                GoogleSyncService.syncToGoogleTask(updatedTask, { dueDate: isoDate });
+                const foundTask = tasks.find(t => t.id === itemId);
+                if (foundTask) {
+                    GoogleSyncService.syncToGoogleTask({ ...foundTask, ...updates }, { dueDate: isoDate });
+                }
             } else {
                 updateItem(itemId, updates);
-                
-                // Seamless Sync
                 const { items } = useAppStore.getState();
-                const updatedItem = { ...items.find(i => i.id === itemId), ...updates };
-                GoogleSyncService.syncToGoogleEvent(updatedItem, { 
-                    start: isoDate, 
-                    end: isoDate, // All day usually
-                    isAllDay: true
-                });
+                const foundItem = items.find(i => i.id === itemId);
+                if (foundItem) {
+                    GoogleSyncService.syncToGoogleEvent({ ...foundItem, ...updates }, {
+                        start: isoDate,
+                        end: isoDate,
+                    });
+                }
             }
         }
     };
@@ -61,208 +57,239 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
     const handleEntryClick = (e: React.MouseEvent, entry: CalendarEntry) => {
         e.stopPropagation();
         if (entry.isGhost) {
-            // For now, alert or simple log. In Phase 2, this will open a Google Event Detail modal
-            console.log('Clicked Ghost Event:', entry);
-            alert(`Google Event: ${entry.title}\n(This is a live preview from Google)`);
+            alert(`Google Event: ${entry.title}`);
             return;
         }
-
         if (entry.type === 'item' || entry.type === 'task') {
             openScheduler(entry.id);
         }
     };
 
-    const getIcon = (entry: CalendarEntry) => {
-        if (entry.type === 'google-event') return <CalendarIcon size={10} />;
-        if (entry.type === 'google-task') return <CheckSquare size={10} />;
-        if (entry.type === 'task') return <CheckSquare size={10} />;
-        
-        // Item types
-        switch (entry.sourceType) {
-            case 'file': return <File size={10} />;
-            case 'folder': return <Folder size={10} />;
-            case 'link': return <Link size={10} />;
-            case 'image': return <Image size={10} />;
-            default: return null;
-        }
-    };
-
     return (
-        <div className="calendar-grid" style={{ '--week-count': weekCount } as React.CSSProperties}>
+        <div className="calendar-grid-container" style={{ '--week-count': weekCount } as React.CSSProperties}>
             {/* Weekday Headers */}
-            {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => (
-                <div key={day} className="weekday-header">{day}</div>
-            ))}
+            <div className="calendar-header-row">
+                {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => (
+                    <div key={day} className="weekday-header">{day}</div>
+                ))}
+            </div>
 
-            {/* Days */}
-            {days.map(day => {
-                const entries = getEntriesForDate(day);
-                const isCurrentMonth = isSameMonth(day, monthStart);
-                const isSelected = selectedDate && isSameDay(day, selectedDate);
+            {/* Grid */}
+            <div className="calendar-body-grid">
+                {days.map(day => {
+                    const entries = getEntriesForDate(day);
+                    const isCurrentMonth = isSameMonth(day, monthStart);
+                    const isSelected = selectedDate && isSameDay(day, selectedDate);
+                    
+                    // Limit visible entries to 3
+                    const visibleEntries = entries.slice(0, 3);
+                    const hiddenCount = entries.length - 3;
 
-                return (
-                    <div
-                        key={day.toISOString()}
-                        className={`calendar-grid-day ${!isCurrentMonth ? 'other-month' : ''} ${isToday(day) ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`}
-                        onClick={() => onSelectDate?.(day)}
-                        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
-                        onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
-                        onDrop={(e) => { e.currentTarget.classList.remove('drag-over'); handleDrop(e, day); }}
-                    >
-                        <span className={`day-number ${isToday(day) ? 'today-badge' : ''}`}>
-                            {format(day, 'd')}
-                        </span>
+                    return (
+                        <div
+                            key={day.toISOString()}
+                            className={`grid-day ${!isCurrentMonth ? 'other-month' : ''} ${isToday(day) ? 'is-today' : ''} ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => onSelectDate?.(day)}
+                            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
+                            onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
+                            onDrop={(e) => { e.currentTarget.classList.remove('drag-over'); handleDrop(e, day); }}
+                        >
+                            <div className="day-header">
+                                <span className="day-number">{format(day, 'd')}</span>
+                            </div>
 
-                        <div className="day-entries">
-                            {entries.slice(0, 4).map(entry => (
-                                <div
-                                    key={entry.id}
-                                    className={`calendar-chip ${entry.allDay ? 'all-day' : 'timed'} ${entry.isGhost ? 'ghost' : ''}`}
-                                    style={{ '--chip-color': entry.color } as React.CSSProperties}
-                                    onClick={(e) => handleEntryClick(e, entry)}
-                                    draggable={!entry.isGhost}
-                                    onDragStart={(e) => {
-                                        e.dataTransfer.setData('text/plain', entry.id);
-                                        e.dataTransfer.setData('item-type', entry.type === 'task' ? 'task' : 'item');
-                                    }}
-                                    title={entry.title}
-                                >
-                                    {getIcon(entry)}
-                                    {!entry.allDay && (
-                                        <span className="chip-time">{format(entry.start, 'h:mma').toLowerCase()}</span>
-                                    )}
-                                    <span className="chip-title">{entry.title}</span>
-                                </div>
-                            ))}
-                            {entries.length > 4 && (
-                                <div className="more-count">+{entries.length - 4} more</div>
-                            )}
+                            <div className="day-content">
+                                {visibleEntries.map(entry => (
+                                    <div
+                                        key={entry.id}
+                                        className={`event-chip ${entry.allDay ? 'all-day' : 'timed'} ${entry.isGhost ? 'ghost' : ''}`}
+                                        style={{ '--event-color': entry.color || '#3B82F6' } as React.CSSProperties}
+                                        onClick={(e) => handleEntryClick(e, entry)}
+                                        draggable={!entry.isGhost}
+                                        onDragStart={(e) => {
+                                            e.dataTransfer.setData('text/plain', entry.id);
+                                            e.dataTransfer.setData('item-type', entry.type === 'task' ? 'task' : 'item');
+                                        }}
+                                        title={entry.title}
+                                    >
+                                        {entry.allDay ? (
+                                            // All Day: Solid Block
+                                            <span className="event-title">{entry.title}</span>
+                                        ) : (
+                                            // Timed: Dot + Text
+                                            <>
+                                                <span className="event-dot" />
+                                                <span className="event-time">{format(entry.start, 'h:mm a')}</span>
+                                                <span className="event-title">{entry.title}</span>
+                                            </>
+                                        )}
+                                    </div>
+                                ))}
+                                {hiddenCount > 0 && (
+                                    <div className="more-events">+{hiddenCount} more</div>
+                                )}
+                            </div>
                         </div>
-                    </div>
-                );
-            })}
+                    );
+                })}
+            </div>
 
             <style>{`
-                .calendar-grid {
+                .calendar-grid-container {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100%;
+                    background: var(--bg-app);
+                }
+
+                .calendar-header-row {
                     display: grid;
                     grid-template-columns: repeat(7, 1fr);
-                    grid-template-rows: auto repeat(var(--week-count, 5), 1fr);
-                    height: 100%;
-                    gap: 0;
-                    border: 1px solid var(--border-light);
-                    background: var(--bg-content);
+                    border-bottom: 1px solid var(--border-light);
+                    flex-shrink: 0;
+                    background: var(--bg-app);
                 }
 
                 .weekday-header {
-                    background: var(--bg-content);
                     padding: 12px 8px;
                     text-align: center;
-                    font-weight: 500;
                     font-size: 11px;
-                    letter-spacing: 0.05em;
-                    color: var(--text-muted);
-                    border-bottom: 1px solid var(--border-light);
+                    font-weight: 600;
+                    color: var(--text-secondary);
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
                 }
 
-                .calendar-grid-day {
-                    background: var(--bg-content);
+                .calendar-body-grid {
+                    display: grid;
+                    grid-template-columns: repeat(7, 1fr);
+                    grid-template-rows: repeat(var(--week-count), 1fr);
+                    flex: 1;
+                    min-height: 0;
+                    background: var(--bg-app);
+                }
+
+                .grid-day {
                     border-right: 1px solid var(--border-light);
                     border-bottom: 1px solid var(--border-light);
-                    padding: 4px;
-                    min-height: 100px;
+                    padding: 2px;
                     display: flex;
                     flex-direction: column;
+                    min-height: 0;
+                    overflow: hidden;
                     cursor: pointer;
                     transition: background 0.1s;
+                    background: var(--bg-app);
                 }
-                .calendar-grid-day:nth-child(7n) { border-right: none; }
-                .calendar-grid-day:hover { background: rgba(0,0,0,0.02); }
-                .calendar-grid-day.other-month { background: #FAFAFA; }
-                .calendar-grid-day.other-month .day-number { color: var(--text-muted); opacity: 0.5; }
-                .calendar-grid-day.is-selected { background: #E8F0FE; }
-                .calendar-grid-day.drag-over { background: #E3F2FD; }
+                .grid-day:nth-child(7n) { border-right: none; }
+                
+                /* Subtle distinction for other month days */
+                .grid-day.other-month { 
+                    background: rgba(0,0,0,0.03);
+                    background-image: radial-gradient(rgba(0,0,0,0.05) 1px, transparent 1px);
+                    background-size: 20px 20px;
+                } 
+                .grid-day.other-month .day-number { color: var(--text-muted); opacity: 0.5; }
+                
+                .grid-day:hover { background: rgba(0,0,0,0.02); }
+                .grid-day.drag-over { background: var(--bg-selection); }
+
+                .day-header {
+                    text-align: center;
+                    padding: 8px 0;
+                }
 
                 .day-number {
                     font-size: 12px;
                     font-weight: 500;
-                    color: var(--text-secondary);
-                    padding: 4px 8px;
-                    text-align: center;
-                    align-self: flex-start;
-                }
-                .day-number.today-badge {
-                    background: #1A73E8;
-                    color: white;
+                    color: var(--text-primary);
+                    width: 24px;
+                    height: 24px;
+                    line-height: 24px;
+                    display: inline-block;
                     border-radius: 50%;
-                    width: 28px;
-                    height: 28px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 0;
                 }
 
-                .day-entries {
+                .grid-day.is-today .day-number {
+                    background: var(--primary);
+                    color: white;
+                    font-weight: 600;
+                }
+
+                .day-content {
                     flex: 1;
                     display: flex;
                     flex-direction: column;
                     gap: 2px;
+                    padding: 0 2px 2px;
                     overflow: hidden;
                 }
 
-                .calendar-chip {
+                /* Events */
+                .event-chip {
                     display: flex;
                     align-items: center;
                     gap: 4px;
-                    padding: 2px 6px;
+                    padding: 1px 4px;
                     border-radius: 4px;
                     font-size: 11px;
                     cursor: pointer;
-                    transition: all 0.1s;
                     overflow: hidden;
+                    white-space: nowrap;
+                    min-height: 18px;
                 }
-                .calendar-chip.all-day {
-                    background: var(--chip-color);
+
+                /* All Day Style */
+                .event-chip.all-day {
+                    background: var(--event-color);
                     color: white;
                 }
-                .calendar-chip.timed {
+                .event-chip.all-day .event-title {
+                    font-weight: 500;
+                }
+
+                /* Timed Style (Dot) */
+                .event-chip.timed {
                     background: transparent;
                     color: var(--text-primary);
-                    border-left: 3px solid var(--chip-color);
-                    padding-left: 4px;
                 }
-                .calendar-chip.ghost {
-                    border: 1px dashed var(--chip-color);
-                    background: rgba(255, 255, 255, 0.5);
-                    opacity: 0.8;
+                .event-chip.timed:hover {
+                    background: rgba(0,0,0,0.04);
                 }
-                .calendar-chip:hover {
-                    opacity: 0.9;
-                    transform: translateX(1px);
-                }
-
-                .chip-time {
-                    font-size: 10px;
-                    color: var(--chip-color);
-                    font-weight: 500;
+                .event-dot {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 50%;
+                    background: var(--event-color);
                     flex-shrink: 0;
                 }
-                .chip-title {
-                    flex: 1;
+                .event-time {
+                    color: var(--text-muted);
+                    font-size: 10px;
+                    margin-right: 2px;
+                }
+
+                .event-title {
                     overflow: hidden;
                     text-overflow: ellipsis;
-                    white-space: nowrap;
+                    font-weight: 400;
                 }
 
-                .more-count {
-                    font-size: 11px;
-                    color: var(--text-muted);
-                    padding: 2px 6px;
-                    font-weight: 500;
+                .event-chip.ghost {
+                    opacity: 0.6;
+                    border: 1px dashed var(--event-color);
                 }
 
-                /* Dark mode */
-                :global(.dark) .calendar-grid-day.other-month { background: #1a1a1a; }
+                .more-events {
+                    font-size: 10px;
+                    font-weight: 600;
+                    color: var(--text-secondary);
+                    padding-left: 6px;
+                    margin-top: 1px;
+                }
+                .more-events:hover {
+                    color: var(--primary);
+                }
             `}</style>
         </div>
     );

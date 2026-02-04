@@ -1,6 +1,5 @@
-import { Calendar, Bell, MoreVertical, Edit3, Trash2 } from 'lucide-react';
+import { Calendar, MoreVertical, Edit3, Trash2 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { useState } from 'react';
 import type { Item, Task } from '../../lib/types';
 
 interface QuickActionsProps {
@@ -12,8 +11,7 @@ function isTask(item: Item | Task): item is Task {
 }
 
 export function QuickActions({ item }: QuickActionsProps) {
-    const { updateItem, updateTask, openScheduler, openContextMenu, setEditingItem, moveItemsToTrash, deleteTask, setSelectedTask } = useAppStore();
-    const [showScheduleMenu, setShowScheduleMenu] = useState(false);
+    const { openScheduler, openContextMenu, setEditingItem, moveItemsToTrash, deleteTask, setSelectedTask } = useAppStore();
 
     const handleEdit = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -35,71 +33,6 @@ export function QuickActions({ item }: QuickActionsProps) {
         }
     };
 
-    // New Quick Schedule Logic
-    const handleQuickSchedule = (e: React.MouseEvent, type: 'later' | 'tomorrow' | 'weekend' | 'week' | 'custom' | 'clear') => {
-        e.stopPropagation();
-        setShowScheduleMenu(false);
-
-        let targetDate: Date | null = new Date();
-
-        switch (type) {
-            case 'later':
-                // +3 hours
-                targetDate.setHours(targetDate.getHours() + 3);
-                break;
-            case 'tomorrow':
-                // Tomorrow 9am
-                targetDate.setDate(targetDate.getDate() + 1);
-                targetDate.setHours(9, 0, 0, 0);
-                break;
-            case 'weekend':
-                // Next Saturday 9am
-                const day = targetDate.getDay();
-                const diff = 6 - day + (day >= 6 ? 7 : 0); // If Sat, next Sat.
-                targetDate.setDate(targetDate.getDate() + diff);
-                targetDate.setHours(9, 0, 0, 0);
-                break;
-            case 'week':
-                // Next Monday 9am
-                const d = targetDate.getDay();
-                const diffM = 1 - d + (d >= 1 ? 7 : 0); // If Mon, next Mon.
-                targetDate.setDate(targetDate.getDate() + diffM);
-                targetDate.setHours(9, 0, 0, 0);
-                break;
-            case 'custom':
-                openScheduler(item.id);
-                return;
-            case 'clear':
-                targetDate = null;
-                break;
-        }
-
-        const updates = { due_at: targetDate ? targetDate.toISOString() : null };
-        
-        if (isTask(item)) {
-            updateTask(item.id, updates);
-        } else {
-            updateItem(item.id, updates);
-        }
-    };
-
-    const handleScheduleClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setShowScheduleMenu(!showScheduleMenu);
-    };
-
-    const handleReminder = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        // Quick reminder - set for 1 hour from now
-        const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-        const updates = { remind_at: item.remind_at ? null : oneHourFromNow };
-        
-        if (isTask(item)) {
-            updateTask(item.id, updates);
-        } else {
-            updateItem(item.id, updates);
-        }
-    };
 
     const handleMore = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -109,42 +42,21 @@ export function QuickActions({ item }: QuickActionsProps) {
 
     return (
         <div className="quick-actions-center-dock" onClick={(e) => e.stopPropagation()}>
-            
-            {/* Schedule */}
-            <div className="dock-action-wrapper" style={{ position: 'relative' }}>
-                <button
-                    className="dock-action-btn"
-                    onClick={handleScheduleClick}
-                    title="Set due date"
-                    style={item.due_at ? { color: '#10B981', background: '#ECFDF5' } : undefined}
-                >
-                    <Calendar size={16} />
-                </button>
-                {/* Schedule Menu - Pops UP */}
-                {showScheduleMenu && (
-                    <div className="dock-popup-menu" onMouseLeave={() => setShowScheduleMenu(false)}>
-                        <div className="dock-menu-item" onClick={(e) => handleQuickSchedule(e, 'later')}>Later today (+3h)</div>
-                        <div className="dock-menu-item" onClick={(e) => handleQuickSchedule(e, 'tomorrow')}>Tomorrow (9am)</div>
-                        <div className="dock-menu-item" onClick={(e) => handleQuickSchedule(e, 'weekend')}>This Weekend</div>
-                        <div className="dock-menu-item" onClick={(e) => handleQuickSchedule(e, 'week')}>Next Week</div>
-                        <div className="dock-menu-divider" />
-                        <div className="dock-menu-item" onClick={(e) => handleQuickSchedule(e, 'custom')}>Custom...</div>
-                        {item.due_at && (
-                            <div className="dock-menu-item danger" onClick={(e) => handleQuickSchedule(e, 'clear')}>Clear Due Date</div>
-                        )}
-                    </div>
-                )}
-            </div>
 
-            {/* Reminder */}
+            {/* Schedule - Opens Scheduler Modal */}
             <button
                 className="dock-action-btn"
-                onClick={handleReminder}
-                title={item.remind_at ? "Remove reminder" : "Add reminder"}
-                style={item.remind_at ? { color: '#3B82F6', background: '#EFF6FF' } : undefined}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    openScheduler(item.id);
+                }}
+                title="Schedule"
+                style={item.scheduled_at ? { color: '#10B981', background: '#ECFDF5' } : undefined}
             >
-                <Bell size={16} />
+                <Calendar size={16} />
             </button>
+
+
 
             {/* Edit */}
             <button
@@ -200,8 +112,9 @@ export function QuickActions({ item }: QuickActionsProps) {
                     transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
                 }
 
-                /* Show on Hover */
-                .card:hover .quick-actions-center-dock {
+                /* Show on Hover - for ItemCard (.card) and agenda cards (.agenda-card) */
+                .card:hover .quick-actions-center-dock,
+                .agenda-card:hover .quick-actions-center-dock {
                     opacity: 1;
                     transform: translateX(-50%) translateY(0) scale(1);
                     pointer-events: auto;

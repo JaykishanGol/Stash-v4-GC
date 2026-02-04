@@ -137,9 +137,11 @@ export function safeParseDateWithFallback(
     return parsed ?? fallback;
 }
 
+import DOMPurify from 'dompurify';
+
 /**
  * Sanitize a string for safe display/storage
- * Removes potentially dangerous characters while preserving readability
+ * Removes potentially dangerous characters and strips XSS vectors
  */
 export function sanitizeString(input: string, options?: {
     maxLength?: number;
@@ -149,8 +151,14 @@ export function sanitizeString(input: string, options?: {
 
     let result = input.trim();
 
-    // Strip HTML tags if not allowed
-    if (!options?.allowHtml) {
+    // If HTML is allowed, use DOMPurify to sanitize it
+    if (options?.allowHtml) {
+        result = DOMPurify.sanitize(result, {
+            USE_PROFILES: { html: true }, // Only allow safe HTML
+            ADD_ATTR: ['target'], // Allow target="_blank" for links
+        });
+    } else {
+        // Strip HTML tags if not allowed
         result = result.replace(/<[^>]*>/g, '');
     }
 

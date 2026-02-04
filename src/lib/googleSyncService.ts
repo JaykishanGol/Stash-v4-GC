@@ -203,7 +203,7 @@ export class GoogleSyncService {
                     completed: new Date().toISOString()
                 });
 
-                if (item.reminder_type === 'recurring') {
+                if (item.recurring_config) {
                     await GoogleSyncService.deleteLink(link.id);
                 }
             } catch (e) {
@@ -211,7 +211,7 @@ export class GoogleSyncService {
             }
         }
 
-        if (item.reminder_type === 'recurring' && item.recurring_config) {
+        if (item.recurring_config) {
             const nextDate = calculateNextOccurrence(item.recurring_config, new Date());
             if (nextDate) {
                 return { shouldResync: true, nextDate };
@@ -225,7 +225,7 @@ export class GoogleSyncService {
 
     static generateSyncTitle(item: Item | Task): string {
         if (!('type' in item)) return item.title; // It's a Task
-        
+
         // It's an Item
         switch (item.type) {
             case 'file': return `[File] ${item.title}`;
@@ -263,7 +263,7 @@ export class GoogleSyncService {
 
         // Universal Footer
         notes += `\n---\nSynced from Stash`;
-        
+
         return notes.trim();
     }
 
