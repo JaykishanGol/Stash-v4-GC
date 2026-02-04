@@ -26,6 +26,7 @@ import { useLocation } from 'wouter';
 import { useAppStore } from '../../store/useAppStore';
 import type { ActiveView, PriorityLevel } from '../../lib/types';
 import { ConfirmationModal } from '../modals/ConfirmationModal';
+import { SettingsModal } from '../modals/SettingsModal';
 
 // Priority colors
 const PRIORITY_COLORS: Record<PriorityLevel, string> = {
@@ -359,6 +360,7 @@ export function Sidebar() {
         deletingList,
         setDeletingList,
         deleteList,
+        toggleSettingsModal,
     } = useAppStore();
 
     const [isNewListModalOpen, setIsNewListModalOpen] = useState(false);
@@ -722,7 +724,7 @@ export function Sidebar() {
                                 <span className="user-email" title={user.email}>{user.email}</span>
                                 <span className="user-plan">Pro Plan</span>
                             </div>
-                            <button className="icon-action-btn" title="Settings">
+                            <button className="icon-action-btn" title="Settings" onClick={toggleSettingsModal}>
                                 <Settings size={18} />
                             </button>
                         </div>
@@ -736,7 +738,7 @@ export function Sidebar() {
                                     <span className="user-email">Guest User</span>
                                     <span className="user-plan">Local Data Only</span>
                                 </div>
-                                <button className="icon-action-btn" title="Settings">
+                                <button className="icon-action-btn" title="Settings" onClick={toggleSettingsModal}>
                                     <Settings size={18} />
                                 </button>
                             </div>
@@ -791,6 +793,8 @@ export function Sidebar() {
                     confirmLabel="Delete"
                     isDanger
                 />
+
+                <SettingsModal />
 
                 <style>{`
                     .sidebar-overlay {

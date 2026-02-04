@@ -86,8 +86,11 @@ export interface UISlice {
     // Notification State
     notifications: AppNotification[];
 
+    isSettingsModalOpen: boolean;
+
     // ACTIONS
     toggleSidebar: () => void;
+    toggleSettingsModal: () => void;
     setViewMode: (mode: ViewMode) => void;
     setActiveView: (view: ActiveView) => void;
     toggleTheme: () => void;
@@ -179,7 +182,10 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
     filters: { type: null, priority: null },
     notifications: [],
 
+    isSettingsModalOpen: false,
+
     toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+    toggleSettingsModal: () => set((state) => ({ isSettingsModalOpen: !state.isSettingsModalOpen })),
     setViewMode: (mode) => set({ viewMode: mode }),
     setActiveView: (view) => set({
         activeView: view,
