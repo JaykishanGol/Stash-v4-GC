@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+﻿import { useState, useCallback } from 'react';
 import {
     Search,
     Home,
@@ -17,7 +17,6 @@ import {
     Menu,
     Trash2,
     Plus,
-    X,
     ListTodo,
     Archive,
     User
@@ -26,6 +25,9 @@ import { useLocation } from 'wouter';
 import { useAppStore } from '../../store/useAppStore';
 import type { ActiveView, PriorityLevel } from '../../lib/types';
 import { ConfirmationModal } from '../modals/ConfirmationModal';
+import { ListModal } from '../modals/ListFolderModals';
+import { NewFolderModal } from '../modals/ListFolderModals';
+import '../../styles/sidebar.css';
 
 
 // Priority colors
@@ -173,223 +175,6 @@ function FolderItem({ type, icon, name, count, onClick, onDrop, isDragTarget }: 
     );
 }
 
-// List Modal Component (Create / Edit)
-interface ListModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    onSubmit: (name: string, color: string) => void;
-    initialData?: { name: string; color: string };
-    title?: string;
-    submitLabel?: string;
-}
-
-const LIST_COLORS = [
-    '#EF4444', '#F59E0B', '#10B981', '#3B82F6',
-    '#8B5CF6', '#EC4899', '#14B8A6', '#6366F1'
-];
-
-function ListModal({ isOpen, onClose, onSubmit, initialData, title = 'New List', submitLabel = 'Create List' }: ListModalProps) {
-    // We use a key to reset state when initialData changes or modal re-opens
-    return (
-        <ListModalContent
-            key={isOpen ? 'open' : 'closed'} // Reset when opening
-            isOpen={isOpen}
-            onClose={onClose}
-            onSubmit={onSubmit}
-            initialData={initialData}
-            title={title}
-            submitLabel={submitLabel}
-        />
-    );
-}
-
-function ListModalContent({ isOpen, onClose, onSubmit, initialData, title, submitLabel }: ListModalProps) {
-    const [name, setName] = useState(initialData?.name || '');
-    const [color, setColor] = useState(initialData?.color || LIST_COLORS[0]);
-
-    if (!isOpen) return null;
-
-    const handleSubmit = () => {
-        if (name.trim()) {
-            onSubmit(name.trim(), color);
-            // Don't clear here, let parent handle closing/resetting
-        }
-    };
-
-    return (
-        <div className="modal-overlay active" onClick={onClose}>
-            <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
-                <div className="modal-header">
-                    <h2 className="modal-title">{title}</h2>
-                    <button className="modal-close" onClick={onClose}>
-                        <X size={20} />
-                    </button>
-                </div>
-                <div className="modal-body">
-                    <div style={{ marginBottom: 16 }}>
-                        <label style={{
-                            display: 'block',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: '#6B7280',
-                            marginBottom: 8,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em'
-                        }}>
-                            List Name
-                        </label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="Enter list name..."
-                            style={{
-                                width: '100%',
-                                padding: '12px 14px',
-                                fontSize: '0.9375rem',
-                                border: '2px solid #E5E7EB',
-                                borderRadius: 10,
-                                outline: 'none',
-                                fontFamily: 'inherit',
-                            }}
-                            onFocus={(e) => e.target.style.borderColor = '#F59E0B'}
-                            onBlur={(e) => e.target.style.borderColor = '#E5E7EB'}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                            autoFocus
-                        />
-                    </div>
-                    <div>
-                        <label style={{
-                            display: 'block',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: '#6B7280',
-                            marginBottom: 8,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em'
-                        }}>
-                            Color
-                        </label>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            {LIST_COLORS.map((c) => (
-                                <button
-                                    key={c}
-                                    onClick={() => setColor(c)}
-                                    style={{
-                                        width: 36,
-                                        height: 36,
-                                        borderRadius: 10,
-                                        backgroundColor: c,
-                                        border: color === c ? '3px solid #1F2937' : '3px solid transparent',
-                                        cursor: 'pointer',
-                                        transition: 'transform 0.15s',
-                                    }}
-                                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                </div>
-                <div className="modal-footer">
-                    <button
-                        onClick={onClose}
-                        className="btn btn-secondary"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleSubmit}
-                        className="btn btn-primary"
-                    >
-                        {submitLabel}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-interface NewFolderModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    onSubmit: (name: string) => void;
-}
-
-function NewFolderModal({ isOpen, onClose, onSubmit }: NewFolderModalProps) {
-    const [name, setName] = useState('');
-
-    if (!isOpen) return null;
-
-    const handleSubmit = () => {
-        if (name.trim()) {
-            onSubmit(name.trim());
-            setName('');
-            onClose();
-        }
-    };
-
-    return (
-        <div className="modal-overlay active" onClick={onClose}>
-            <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
-                <div className="modal-header">
-                    <h2 className="modal-title">New Folder</h2>
-                    <button className="modal-close" onClick={onClose}>
-                        <X size={20} />
-                    </button>
-                </div>
-                <div className="modal-body">
-                    <div style={{ marginBottom: 16 }}>
-                        <label style={{
-                            display: 'block',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: '#6B7280',
-                            marginBottom: 8,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em'
-                        }}>
-                            Folder Name
-                        </label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="Enter folder name..."
-                            style={{
-                                width: '100%',
-                                padding: '12px 14px',
-                                fontSize: '0.9375rem',
-                                border: '2px solid #E5E7EB',
-                                borderRadius: 10,
-                                outline: 'none',
-                                fontFamily: 'inherit',
-                            }}
-                            onFocus={(e) => e.target.style.borderColor = '#F59E0B'}
-                            onBlur={(e) => e.target.style.borderColor = '#E5E7EB'}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                            autoFocus
-                        />
-                    </div>
-                </div>
-                <div className="modal-footer">
-                    <button
-                        onClick={onClose}
-                        className="btn btn-secondary"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleSubmit}
-                        className="btn btn-primary"
-                    >
-                        Create Folder
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
 
 export function Sidebar() {
     const [, setLocation] = useLocation();
@@ -539,7 +324,7 @@ export function Sidebar() {
                 {/* Header */}
                 <div className="sidebar-header">
                     <span className="logo">Menu</span>
-                    <button className="menu-toggle" onClick={toggleSidebar}>
+                    <button className="menu-toggle" onClick={toggleSidebar} aria-label="Toggle menu">
                         <Menu size={20} />
                     </button>
                 </div>
@@ -559,6 +344,7 @@ export function Sidebar() {
                         {searchQuery ? (
                             <button
                                 className="search-clear-btn"
+                                aria-label="Clear search"
                                 onClick={() => setSearchQuery('')}
                                 style={{
                                     position: 'absolute',
@@ -578,7 +364,7 @@ export function Sidebar() {
                                     fontSize: 10,
                                 }}
                             >
-                                ✕
+                                âœ•
                             </button>
                         ) : (
                             <span style={{
@@ -595,7 +381,7 @@ export function Sidebar() {
                                 border: '1px solid var(--border-light)',
                                 pointerEvents: 'none',
                             }}>
-                                ⌘K
+                                âŒ˜K
                             </span>
                         )}
                     </div>
@@ -720,6 +506,7 @@ export function Sidebar() {
                     {/* Custom Folders Section */}
                     <nav className="nav-section">
                         <h3 className="nav-section-title">Folders</h3>
+                        <ul className="nav-list">
                         {folders.filter(f => !f.parent_id).map(folder => (
                             <FolderItem
                                 key={folder.id}
@@ -732,6 +519,7 @@ export function Sidebar() {
                                 onDrop={(e) => handleFolderDrop(e, folder.id)}
                             />
                         ))}
+                        </ul>
                         <NavItem
                             icon={<Plus size={16} />}
                             label="New Folder"
@@ -767,6 +555,7 @@ export function Sidebar() {
                                                 className="nav-action-btn edit"
                                                 onClick={(e) => { e.stopPropagation(); setEditingList(list); }}
                                                 title="Edit List"
+                                                aria-label="Edit List"
                                             >
                                                 <Settings size={14} />
                                             </button>
@@ -774,6 +563,7 @@ export function Sidebar() {
                                                 className="nav-action-btn delete"
                                                 onClick={(e) => { e.stopPropagation(); setDeletingList(list); }}
                                                 title="Delete List"
+                                                aria-label="Delete List"
                                             >
                                                 <Trash2 size={14} />
                                             </button>
@@ -842,7 +632,7 @@ export function Sidebar() {
                                 <span className="user-email" title={user.email}>{user.email}</span>
                                 <span className="user-plan">Pro Plan</span>
                             </div>
-                            <button className="icon-action-btn" title="Settings" onClick={toggleSettingsModal}>
+                            <button className="icon-action-btn" title="Settings" aria-label="Settings" onClick={toggleSettingsModal}>
                                 <Settings size={18} />
                             </button>
                         </div>
@@ -856,7 +646,7 @@ export function Sidebar() {
                                     <span className="user-email">Guest User</span>
                                     <span className="user-plan">Local Data Only</span>
                                 </div>
-                                <button className="icon-action-btn" title="Settings" onClick={toggleSettingsModal}>
+                                <button className="icon-action-btn" title="Settings" aria-label="Settings" onClick={toggleSettingsModal}>
                                     <Settings size={18} />
                                 </button>
                             </div>
@@ -913,157 +703,6 @@ export function Sidebar() {
                 />
 
 
-
-                <style>{`
-                    .sidebar-overlay {
-                        display: none;
-                        position: fixed;
-                        inset: 0;
-                        background: rgba(0, 0, 0, 0.4);
-                        backdrop-filter: blur(2px);
-                        z-index: 90;
-                        transition: opacity 0.3s;
-                    }
-                    @media (max-width: 768px) {
-                        .sidebar-overlay {
-                            display: block;
-                        }
-                    }
-
-                    .nav-item-wrapper {
-                        position: relative;
-                        display: flex;
-                        align-items: center;
-                    }
-                    .nav-item-wrapper .nav-item {
-                        flex: 1;
-                    }
-                    .nav-item-actions {
-                        position: absolute;
-                        right: 8px;
-                        display: none;
-                        gap: 4px;
-                        align-items: center;
-                        height: 100%;
-                    }
-                    .nav-item-wrapper:hover .nav-item-actions {
-                        display: flex;
-                    }
-                    .nav-item-wrapper:hover .nav-badge {
-                        display: none;
-                    }
-                    .nav-action-btn {
-                        background: transparent;
-                        border: none;
-                        color: var(--text-muted);
-                        cursor: pointer;
-                        padding: 4px;
-                        border-radius: 4px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        transition: all 0.15s;
-                    }
-                    .nav-action-btn:hover {
-                        background: var(--bg-hover);
-                        color: var(--text-primary);
-                    }
-                    .nav-action-btn.delete:hover {
-                        color: #EF4444;
-                        background: #FEE2E2;
-                    }
-
-                    /* User Profile Styles */
-                    .user-card, .guest-card {
-                        background: #F9FAFB;
-                        border-radius: 12px;
-                        padding: 12px;
-                        border: 1px solid var(--border-light);
-                    }
-                    .user-card {
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                    }
-                    .user-avatar-placeholder {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 50%;
-                        background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-                        color: white;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-weight: 600;
-                        font-size: 0.9rem;
-                        flex-shrink: 0;
-                    }
-                    .user-avatar-placeholder.guest {
-                        background: #E5E7EB;
-                        color: #6B7280;
-                    }
-                    .user-details {
-                        flex: 1;
-                        display: flex;
-                        flex-direction: column;
-                        min-width: 0;
-                    }
-                    .user-email {
-                        font-size: 0.85rem;
-                        font-weight: 600;
-                        color: var(--text-primary);
-                        white-space: nowrap;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                    }
-                    .user-plan {
-                        font-size: 0.7rem;
-                        color: var(--text-secondary);
-                    }
-                    .icon-action-btn {
-                        width: 32px;
-                        height: 32px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        border: none;
-                        background: transparent;
-                        color: var(--text-secondary);
-                        border-radius: 6px;
-                        cursor: pointer;
-                        transition: all 0.2s;
-                    }
-                    .icon-action-btn:hover {
-                        background: rgba(0,0,0,0.05);
-                        color: var(--text-primary);
-                    }
-
-                    .guest-header {
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                        margin-bottom: 12px;
-                    }
-                    .signin-btn-full {
-                        width: 100%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        gap: 8px;
-                        padding: 8px;
-                        background: var(--primary);
-                        color: white;
-                        border: none;
-                        border-radius: 8px;
-                        font-size: 0.85rem;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: opacity 0.2s;
-                    }
-                    .signin-btn-full:hover {
-                        opacity: 0.9;
-                    }
-                `}</style>
             </aside>
         </>
     );

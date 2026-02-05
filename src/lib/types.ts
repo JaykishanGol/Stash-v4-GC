@@ -82,6 +82,9 @@ export interface Item {
 
   // Sync Status
   is_unsynced?: boolean;
+
+  // Server-side full-text search field (populated by DB trigger)
+  search_text?: string | null;
 }
 
 // ============ RECURRING RULE ============

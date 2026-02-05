@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import type { AppState } from '../types';
 import {
     validateItemForSync,
 } from '../../lib/types';
@@ -19,8 +20,7 @@ import {
     createDeleteItemsAction, 
     createMoveItemsAction,
 } from '../../lib/undoStack';
-// Note: We might need to import the full AppState interface to type get() correctly, 
-// but to avoid circular deps we'll use 'any' or a partial type for get() in implementation.
+
 
 export interface DataSlice {
     // Data State
@@ -42,12 +42,6 @@ export interface DataSlice {
     itemsLoadedCount: number;
     loadMoreItems: () => Promise<void>;
 
-    // Undo/Redo State
-    canUndo: boolean;
-    canRedo: boolean;
-    undoDescription: string | null;
-    redoDescription: string | null;
-
     // ACTIONS
     // Item Actions
     addItem: (item: Item) => void;
@@ -68,16 +62,6 @@ export interface DataSlice {
     setItemDueDate: (id: string, dueAt: string | null) => void;
     setItemReminder: (id: string, remindAt: string | null) => void;
     acknowledgeReminder: (id: string, type?: 'item' | 'task') => void;
-
-    // Task Actions
-    addTask: (task: Omit<Task, 'id' | 'created_at' | 'updated_at' | 'list_id' | 'deleted_at'> & { list_id?: string | null }) => void;
-    updateTask: (id: string, updates: Partial<Task>) => void;
-    deleteTask: (id: string) => void;
-    completeTask: (id: string) => void;
-    toggleTaskCompletion: (id: string) => void; // Added missing action
-    addItemsToTask: (taskId: string, itemIds: string[]) => void;
-    removeItemFromTask: (taskId: string, itemId: string) => void;
-    toggleTaskItemCompletion: (taskId: string, itemId: string) => void;
 
     // Folder Actions
     addFolder: (folder: Folder) => void;
@@ -103,26 +87,15 @@ export interface DataSlice {
     // Sync Actions
     syncItemToDb: (item: Item) => Promise<void>;
     deleteItemFromDb: (id: string) => Promise<void>;
-    syncTaskToDb: (task: Task) => Promise<void>;
 
     // Search Actions
     searchItems: (query: string) => Promise<Item[]>;
-
-    // Clipboard (Data logic)
-    cutItems: (ids?: string[]) => void;
-    copyItems: (ids?: string[]) => void;
-    pasteItems: (targetFolderId?: string | null) => void;
-
-    // Undo/Redo Actions
-    undo: () => void;
-    redo: () => void;
-    updateUndoState: () => void;
 
     // Data Reset (for sign out)
     clearAllUserData: () => void;
 }
 
-export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
+export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, get) => ({
     items: [],
     trashedItems: [],
     folders: [],
@@ -133,15 +106,9 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     uploads: [],
     hasMoreItems: false,
     itemsLoadedCount: 0,
-    
-    // Undo/Redo State
-    canUndo: undoStack.canUndo(),
-    canRedo: undoStack.canRedo(),
-    undoDescription: undoStack.getUndoDescription(),
-    redoDescription: undoStack.getRedoDescription(),
 
     loadMoreItems: async () => {
-        const state = get() as any;
+        const state = get();
         const { user, itemsLoadedCount, hasMoreItems } = state;
         
         if (!user || !hasMoreItems) {
@@ -173,10 +140,10 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             }
 
             if (moreItems && moreItems.length > 0) {
-                const activeItems = moreItems.filter((i: any) => !i.deleted_at);
-                const trashedItems = moreItems.filter((i: any) => i.deleted_at);
+                const activeItems = moreItems.filter((i: Item) => !i.deleted_at);
+                const trashedItems = moreItems.filter((i: Item) => i.deleted_at);
 
-                set((state: any) => ({
+                set((state) => ({
                     items: [...state.items, ...activeItems],
                     trashedItems: [...state.trashedItems, ...trashedItems],
                     itemsLoadedCount: state.itemsLoadedCount + moreItems.length,
@@ -198,7 +165,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         const itemWithFlag = { ...item, is_unsynced: true };
 
         // Context-Aware Creation: If inside a list, auto-link it
-        const state = get() as any; // Cast to access UI slice
+        const state = get();
         const selectedListId = state.selectedListId;
 
         set((state) => {
@@ -354,9 +321,10 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         get().refreshFolderCounts();
         
         // Notify with Undo
-        (get() as any).addNotification(
+        get().addNotification(
             'success', 
             `Moved ${itemsToTrash.length} item${itemsToTrash.length !== 1 ? 's' : ''} to trash`, 
+            'Undo available',
             'Undo',
             () => get().undo()
         );
@@ -435,6 +403,14 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         
         // Remove duplicates
         idsToDelete = [...new Set(idsToDelete)];
+
+        // CRITICAL: Clear pending queue operations for these items.
+        // This prevents resurrection if a soft-delete upsert is still pending.
+        persistentSyncQueue.clearPendingForItems(idsToDelete);
+        
+        // TOMBSTONE: Locally ban these IDs immediately.
+        // Even if server delete fails or lags, these will never show in UI again.
+        tombstoneManager.add(idsToDelete);
 
         // Clean up storage for ALL items
         for (const targetId of idsToDelete) {
@@ -526,7 +502,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
                 get().deleteItemFromDb(item.id);
             });
             
-            const state = get() as any;
+            const state = get();
             state.addNotification?.('warning', 'Trash emptying slowly', 'Using fallback method due to network error.');
         }
     },
@@ -609,9 +585,10 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         get().refreshFolderCounts();
 
         // Notify
-        (get() as any).addNotification(
+        get().addNotification(
             'success',
             `Moved ${ids.length} item${ids.length !== 1 ? 's' : ''}`,
+            'Undo available',
             'Undo',
             () => get().undo()
         );
@@ -708,97 +685,6 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         // Could add a "snoozed" field in future if needed
     },
 
-    // Tasks
-    addTask: async (taskData) => {
-        const now = new Date().toISOString();
-        const { generateId } = await import('../../lib/utils');
-
-        const newTask: Task = {
-            id: generateId(),
-            created_at: now,
-            updated_at: now,
-            deleted_at: null,
-            list_id: taskData.list_id || null,
-            // CRITICAL: Initialize arrays to prevent drag-drop failures
-            ...taskData,
-            item_ids: taskData.item_ids || [],
-            item_completion: taskData.item_completion || {}
-        };
-        set(state => ({ tasks: [newTask, ...state.tasks] }));
-        get().syncTaskToDb(newTask);
-        get().calculateStats();
-
-        // Google Sync
-        googleSyncQueue.enqueue(newTask.id, 'task', newTask, {
-            dueDate: newTask.scheduled_at || undefined,
-            notes: newTask.description || undefined
-        });
-    },
-
-    updateTask: (id, updates) => {
-        set(state => ({
-            tasks: state.tasks.map(t => t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t)
-        }));
-        const task = get().tasks.find(t => t.id === id);
-        if (task) {
-            get().syncTaskToDb(task);
-
-            // Google Sync
-            googleSyncQueue.enqueue(task.id, 'task', task, {
-                dueDate: task.scheduled_at || undefined,
-                notes: task.description || undefined
-            });
-        }
-        get().calculateStats();
-    },
-
-    deleteTask: (id) => {
-        set(state => ({ tasks: state.tasks.filter(t => t.id !== id) }));
-        // Hard delete for now based on original store, or implement soft delete
-        persistentSyncQueue.add('delete-task', id, null);
-        get().calculateStats();
-    },
-
-    completeTask: (id) => {
-        const task = get().tasks.find(t => t.id === id);
-        if (task) {
-            get().updateTask(id, { is_completed: !task.is_completed });
-        }
-    },
-
-    toggleTaskCompletion: (id) => {
-        get().completeTask(id);
-    },
-
-    addItemsToTask: (taskId, itemIds) => {
-        const task = get().tasks.find(t => t.id === taskId);
-        if (!task) return;
-
-        const newIds = [...new Set([...task.item_ids, ...itemIds])];
-        get().updateTask(taskId, { item_ids: newIds });
-    },
-
-    removeItemFromTask: (taskId, itemId) => {
-        const task = get().tasks.find(t => t.id === taskId);
-        if (!task) return;
-
-        const newIds = task.item_ids.filter(id => id !== itemId);
-        const newCompletion = { ...task.item_completion };
-        delete newCompletion[itemId];
-
-        get().updateTask(taskId, { item_ids: newIds, item_completion: newCompletion });
-    },
-
-    toggleTaskItemCompletion: (taskId, itemId) => {
-        const task = get().tasks.find(t => t.id === taskId);
-        if (!task) return;
-
-        const current = task.item_completion[itemId] || false;
-        get().updateTask(taskId, {
-            item_completion: { ...task.item_completion, [itemId]: !current }
-        });
-    },
-
     // Folders & Lists
     addFolder: (folder) => set(state => ({ folders: [...state.folders, folder] })),
 
@@ -815,8 +701,7 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             created_at: new Date().toISOString()
         };
         // We need user_id. In the combined store, we can access user.
-        // For now, we assume it's patched before sync or we access (get() as any).user.id
-        const user = (get() as any).user;
+        const user = get().user;
         if (user) list.user_id = user.id;
 
         set(state => ({ lists: [...state.lists, list] }));
@@ -970,121 +855,6 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
     deleteItemFromDb: async (id) => {
         persistentSyncQueue.add('delete-item', id, null);
     },
-    syncTaskToDb: async (task) => {
-        persistentSyncQueue.add('upsert-task', task.id, task);
-    },
-
-    // Clipboard
-    cutItems: (ids) => {
-        const { selectedItemIds, items } = get() as any; // Cast for UI slice access
-        const targetIds = ids || selectedItemIds;
-        const itemsToCut = items.filter((i: Item) => targetIds.includes(i.id));
-        if (itemsToCut.length > 0) {
-            (set as any)({ clipboard: { items: itemsToCut, operation: 'cut' } });
-            // Ideally clear selection here
-        }
-    },
-    copyItems: (ids) => {
-        const { selectedItemIds, items } = get() as any;
-        const targetIds = ids || selectedItemIds;
-        const itemsToCopy = items.filter((i: Item) => targetIds.includes(i.id));
-        if (itemsToCopy.length > 0) {
-            (set as any)({ clipboard: { items: itemsToCopy, operation: 'copy' } });
-        }
-    },
-    pasteItems: async (targetFolderId = null) => {
-        const { clipboard, user } = get() as any;
-        if (!clipboard.items.length || !clipboard.operation) return;
-
-        const now = new Date().toISOString();
-
-        if (clipboard.operation === 'cut') {
-            // Move items
-            await get().moveItems(clipboard.items.map((i: Item) => i.id), targetFolderId);
-            (set as any)({ clipboard: { items: [], operation: null } });
-        } else {
-            // COPY OPERATION
-            const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
-            
-            // Separate folders from items
-            const foldersToCopy = clipboard.items.filter((i: Item) => i.type === 'folder');
-            const itemsToCopy = clipboard.items.filter((i: Item) => i.type !== 'folder');
-
-            // 1. Handle Folders (Deep Copy via RPC)
-            if (foldersToCopy.length > 0 && isSupabaseConfigured()) {
-                for (const folder of foldersToCopy) {
-                    try {
-                        const { error } = await supabase.rpc('copy_folder_recursive', {
-                            source_folder_id: folder.id,
-                            target_folder_id: targetFolderId,
-                            new_user_id: user?.id
-                        });
-
-                        if (error) throw error;
-                        console.log(`[DataSlice] Deep copied folder: ${folder.title}`);
-                    } catch (err) {
-                        console.error('[DataSlice] RPC copy failed, falling back to shallow copy', err);
-                        // Fallback: Just copy the folder itself (empty)
-                        const newFolder = {
-                            ...folder,
-                            id: crypto.randomUUID(),
-                            folder_id: targetFolderId,
-                            title: `${folder.title} (Copy)`,
-                            created_at: now,
-                            updated_at: now,
-                            user_id: user?.id || folder.user_id
-                        };
-                        get().addItem(newFolder);
-                    }
-                }
-            } else if (foldersToCopy.length > 0) {
-                // Offline fallback (Shallow copy only)
-                foldersToCopy.forEach((folder: Item) => {
-                     const newFolder = {
-                        ...folder,
-                        id: crypto.randomUUID(),
-                        folder_id: targetFolderId,
-                        title: `${folder.title} (Copy)`,
-                        created_at: now,
-                        updated_at: now,
-                        user_id: user?.id || folder.user_id
-                    };
-                    get().addItem(newFolder);
-                });
-                (get() as any).addNotification?.('warning', 'Deep Copy Unavailable', 'Only empty folders were copied while offline.');
-            }
-
-            // 2. Handle Regular Items (Client-side Duplicate)
-            itemsToCopy.forEach((item: Item) => {
-                const newItem = {
-                    ...item,
-                    id: crypto.randomUUID(),
-                    folder_id: targetFolderId, // Paste into target
-                    created_at: now,
-                    updated_at: now,
-                    user_id: user?.id || item.user_id
-                };
-                get().addItem(newItem);
-            });
-
-            // Refresh to see new server-generated items
-            if (isSupabaseConfigured()) {
-                 setTimeout(() => (get() as any).loadUserData(), 1000); 
-            }
-            
-            (set as any)({ clipboard: { items: [], operation: null } });
-        }
-    },
-
-    // Undo/Redo Implementation
-    updateUndoState: () => {
-        set({
-            canUndo: undoStack.canUndo(),
-            canRedo: undoStack.canRedo(),
-            undoDescription: undoStack.getUndoDescription(),
-            redoDescription: undoStack.getRedoDescription(),
-        });
-    },
 
     // Data Reset (for sign out) - clears all user data from memory
     clearAllUserData: () => {
@@ -1109,172 +879,4 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
         undoStack.clear();
         console.log('[Store] All user data cleared');
     },
-
-    undo: () => {
-        const action = undoStack.popUndo();
-        if (!action) return;
-
-        console.log('[Undo] Executing:', action.type, action.description);
-
-        switch (action.type) {
-            case 'delete-items': {
-                // Restore deleted items
-                const itemsToRestore = action.items;
-                const now = new Date().toISOString();
-                
-                itemsToRestore.forEach(item => {
-                    const restoredItem = { ...item, deleted_at: null, updated_at: now };
-                    
-                    set(state => ({
-                        trashedItems: state.trashedItems.filter(i => i.id !== item.id),
-                        items: [...state.items, restoredItem]
-                    }));
-                    
-                    get().syncItemToDb(restoredItem);
-                });
-                break;
-            }
-            
-            case 'move-items': {
-                // Move items back to original folder
-                const { itemIds, fromFolderId } = action;
-                const now = new Date().toISOString();
-                
-                set(state => ({
-                    items: state.items.map(i =>
-                        itemIds.includes(i.id) 
-                            ? { ...i, folder_id: fromFolderId, updated_at: now } 
-                            : i
-                    )
-                }));
-                
-                itemIds.forEach(id => {
-                    const item = get().items.find(i => i.id === id);
-                    if (item) get().syncItemToDb(item);
-                });
-                break;
-            }
-            
-            case 'delete-task': {
-                // Restore deleted task
-                const { task } = action;
-                const restoredTask = { ...task, deleted_at: null, updated_at: new Date().toISOString() };
-                
-                set(state => ({ tasks: [restoredTask, ...state.tasks] }));
-                get().syncTaskToDb(restoredTask);
-                break;
-            }
-            
-            case 'bulk-archive': {
-                // Unarchive items
-                const { itemIds } = action;
-                itemIds.forEach(id => get().unarchiveItem(id));
-                break;
-            }
-            
-            case 'bulk-unarchive': {
-                // Re-archive items
-                const { itemIds } = action;
-                itemIds.forEach(id => get().archiveItem(id));
-                break;
-            }
-        }
-
-        get().calculateStats();
-        get().refreshFolderCounts();
-        get().updateUndoState();
-        
-        // Show notification
-        const state = get() as any;
-        state.addNotification?.('info', 'Undone', action.description);
-    },
-
-    redo: () => {
-        const action = undoStack.popRedo();
-        if (!action) return;
-
-        console.log('[Redo] Executing:', action.type, action.description);
-
-        switch (action.type) {
-            case 'delete-items': {
-                // Re-delete items
-                const itemIds = action.items.map(i => i.id);
-                // Use a simpler deletion that doesn't push to undo again
-                const now = new Date().toISOString();
-                
-                set(state => {
-                    const itemsToTrash = state.items.filter(i => itemIds.includes(i.id));
-                    const remainingItems = state.items.filter(i => !itemIds.includes(i.id));
-                    
-                    const trashedWithTimestamp = itemsToTrash.map(i => ({
-                        ...i,
-                        deleted_at: now,
-                        updated_at: now
-                    }));
-                    
-                    trashedWithTimestamp.forEach(item => {
-                        get().syncItemToDb(item);
-                    });
-                    
-                    return {
-                        items: remainingItems,
-                        trashedItems: [...state.trashedItems, ...trashedWithTimestamp],
-                    };
-                });
-                break;
-            }
-            
-            case 'move-items': {
-                // Re-move items to new folder
-                const { itemIds, toFolderId } = action;
-                const now = new Date().toISOString();
-                
-                set(state => ({
-                    items: state.items.map(i =>
-                        itemIds.includes(i.id) 
-                            ? { ...i, folder_id: toFolderId, updated_at: now } 
-                            : i
-                    )
-                }));
-                
-                itemIds.forEach(id => {
-                    const item = get().items.find(i => i.id === id);
-                    if (item) get().syncItemToDb(item);
-                });
-                break;
-            }
-            
-            case 'delete-task': {
-                // Re-delete task
-                const { task } = action;
-                set(state => ({
-                    tasks: state.tasks.filter(t => t.id !== task.id)
-                }));
-                persistentSyncQueue.add('delete-task', task.id, null);
-                break;
-            }
-            
-            case 'bulk-archive': {
-                // Re-archive items
-                const { itemIds } = action;
-                itemIds.forEach(id => get().archiveItem(id));
-                break;
-            }
-            
-            case 'bulk-unarchive': {
-                // Re-unarchive items
-                const { itemIds } = action;
-                itemIds.forEach(id => get().unarchiveItem(id));
-                break;
-            }
-        }
-
-        get().calculateStats();
-        get().refreshFolderCounts();
-        get().updateUndoState();
-        
-        // Show notification
-        const state = get() as any;
-        state.addNotification?.('info', 'Redone', action.description);
-    }
 });

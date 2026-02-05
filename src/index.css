@@ -8,6 +8,27 @@
 @import './styles/dock.css';
 @import './styles/agenda.css';
 
+/* ============ Skip Navigation (A11y) ============ */
+.skip-nav {
+    position: absolute;
+    top: 0;
+    left: 16px;
+    z-index: 99999;
+    padding: 8px 16px;
+    background: #2563EB;
+    color: white;
+    border-radius: 0 0 8px 8px;
+    font-weight: 600;
+    font-size: 14px;
+    text-decoration: none;
+    transform: translateY(-110%);
+    transition: transform 0.2s;
+}
+
+.skip-nav:focus {
+    transform: translateY(0);
+}
+
 /* Spinner Animation for Upload Progress */
 @keyframes spin {
     to {
@@ -4841,4 +4862,76 @@ button[style*="background: var(--accent)"]:hover::after {
         opacity: 0 !important;
         pointer-events: none !important;
     }
+}
+
+/* ============ Component Error Boundary ============ */
+.component-error-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 24px;
+    border-radius: 12px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    text-align: center;
+    min-height: 120px;
+}
+
+.component-error-title {
+    font-weight: 600;
+    color: #991B1B;
+    margin: 0;
+    font-size: 14px;
+}
+
+.component-error-detail {
+    font-size: 12px;
+    color: #B91C1C;
+    margin: 0;
+    max-width: 280px;
+    word-break: break-word;
+}
+
+.component-error-retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    border: 1px solid #FECACA;
+    background: white;
+    color: #991B1B;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: background 0.15s;
+}
+
+.component-error-retry:hover {
+    background: #FEF2F2;
+}
+
+.component-error-compact {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: #991B1B;
+    font-size: 12px;
+}
+
+.component-error-retry-sm {
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid #FECACA;
+    background: white;
+    color: #991B1B;
+    font-size: 11px;
+    cursor: pointer;
 }

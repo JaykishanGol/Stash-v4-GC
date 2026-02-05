@@ -74,7 +74,6 @@ export function adaptItemRow(row: ItemRow): Item {
         deleted_at: row.deleted_at ?? null,
         
         // Search
-        // @ts-ignore - search_text is not in types.ts Item yet but is in DB
         search_text: (row as any).search_text ?? null,
     };
 }

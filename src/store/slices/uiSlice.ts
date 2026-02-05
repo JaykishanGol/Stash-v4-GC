@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import type { AppState } from '../types';
 import { supabase } from '../../lib/supabase';
 import { generateId } from '../../lib/utils';
 import type {
@@ -137,13 +138,13 @@ export interface UISlice {
 
     // Notification Actions
     fetchNotifications: () => Promise<void>;
-    addNotification: (type: AppNotification['type'], title: string, message: string) => void;
+    addNotification: (type: AppNotification['type'], title: string, message: string, actionLabel?: string, actionCallback?: () => void) => void;
     markNotificationRead: (id: string) => Promise<void>;
     clearNotifications: () => Promise<void>;
     markAllNotificationsRead: () => Promise<void>;
 }
 
-export const createUISlice: StateCreator<UISlice> = (set, get) => ({
+export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get) => ({
     isSidebarOpen: true,
     viewMode: 'grid',
     activeView: 'home',
@@ -241,7 +242,7 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
         if (!error && data) {
             const mapped: AppNotification[] = data.map(n => ({
                 id: n.id,
-                type: n.type as any,
+                type: n.type as AppNotification['type'],
                 title: n.title,
                 message: n.message,
                 timestamp: n.created_at,
@@ -251,7 +252,7 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
         }
     },
 
-    addNotification: async (type, title, message) => {
+    addNotification: async (type, title, message, _actionLabel?, _actionCallback?) => {
         const notification = {
             id: generateId(),
             type,
@@ -267,7 +268,7 @@ export const createUISlice: StateCreator<UISlice> = (set, get) => ({
         }));
 
         // 2. Persist to DB (if authenticated)
-        const { user } = (get() as any); // Access auth slice
+        const { user } = get();
         if (user && user.id !== 'demo') {
             try {
                 await supabase.from('notifications').insert({

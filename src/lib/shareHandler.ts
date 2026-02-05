@@ -1,9 +1,36 @@
+/**
+ * Share Handler
+ * 
+ * Handles the main-thread side of the share-target Web Share API flow.
+ * 
+ * TWO-STEP FILE HANDLING ARCHITECTURE:
+ * 
+ * Step 1 (sw.js - Service Worker):
+ *   - Intercepts POST requests to share-target URL
+ *   - Reads shared files from FormData
+ *   - Stores raw ArrayBuffer data in IndexedDB (stash-share-db)
+ *   - Redirects to /?share_target=true
+ * 
+ * Step 2 (shareHandler.ts - Main Thread):
+ *   - App.tsx detects ?share_target URL param
+ *   - Calls getPendingShares() to read from IndexedDB
+ *   - processShare() converts ArrayBuffer → File → Item
+ *   - Files are uploaded to Supabase storage
+ *   - clearPendingShares() cleans up IndexedDB
+ * 
+ * WHY THIS PATTERN:
+ *   - Service workers cannot directly access the main app state
+ *   - IndexedDB provides reliable cross-context data transfer
+ *   - Allows offline share capture with deferred processing
+ * 
+ * SHARED CONSTANTS:
+ *   Database config is centralized in ./shareDbConfig.ts
+ *   Both sw.js and this file import from there.
+ */
+
 import { type Item } from './types';
 import { generateId } from './utils';
-
-const SHARE_DB_NAME = 'stash-share-db';
-const SHARE_STORE_NAME = 'shares';
-const DB_VERSION = 2; // Must match sw.js
+import { SHARE_DB_NAME, SHARE_STORE_NAME, SHARE_DB_VERSION } from './shareDbConfig';
 
 export interface ShareData {
     id?: number;
@@ -20,7 +47,7 @@ export interface ShareData {
 
 function openShareDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(SHARE_DB_NAME, DB_VERSION);
+        const request = indexedDB.open(SHARE_DB_NAME, SHARE_DB_VERSION);
 
         // CRITICAL: Create object store if it doesn't exist
         request.onupgradeneeded = (event) => {

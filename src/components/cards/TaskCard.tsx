@@ -63,6 +63,7 @@ export function TaskCard({ task }: TaskCardProps) {
                     <button
                         className={`task-check-btn ${task.is_completed ? 'completed' : ''}`}
                         onClick={(e) => { e.stopPropagation(); toggleTaskCompletion(task.id); }}
+                        aria-label={task.is_completed ? 'Mark task incomplete' : 'Mark task complete'}
                     >
                         <CheckCircle2 size={18} />
                     </button>

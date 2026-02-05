@@ -1,10 +1,14 @@
 import { useState } from 'react';
-import { X, User, LogOut, Settings, Laptop, LogIn, Moon, Sun } from 'lucide-react';
+import { X, User, LogOut, Settings, Laptop, LogIn, Moon, Sun, Download, Database } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { exportData } from '../../lib/exportData';
+import type { ExportFormat } from '../../lib/exportData';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 export function SettingsModal() {
-    const { isSettingsModalOpen, toggleSettingsModal, user, signOut, openAuthModal, theme, toggleTheme } = useAppStore();
-    const [activeTab, setActiveTab] = useState<'general' | 'account'>('account');
+    const { isSettingsModalOpen, toggleSettingsModal, user, signOut, openAuthModal, theme, toggleTheme, items, tasks, lists, addNotification } = useAppStore();
+    const [activeTab, setActiveTab] = useState<'account' | 'general' | 'data'>('account');
+    const trapRef = useFocusTrap<HTMLDivElement>(isSettingsModalOpen);
 
     if (!isSettingsModalOpen) return null;
 
@@ -18,7 +22,7 @@ export function SettingsModal() {
 
     return (
         <div className="modal-overlay active" onClick={handleBackdropClick} style={{ zIndex: 999 }}>
-            <div className="modal" style={{ width: 500, maxWidth: '95vw', height: 'auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div ref={trapRef} className="modal" style={{ width: 500, maxWidth: '95vw', height: 'auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
                 <div className="modal-header">
                     <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <Settings size={20} />
@@ -59,6 +63,21 @@ export function SettingsModal() {
                         }}
                     >
                         <Laptop size={16} /> General
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('data')}
+                        style={{
+                            padding: '12px 20px',
+                            background: 'none',
+                            border: 'none',
+                            borderBottom: activeTab === 'data' ? '2px solid #2563EB' : '2px solid transparent',
+                            color: activeTab === 'data' ? '#2563EB' : '#6B7280',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 8
+                        }}
+                    >
+                        <Database size={16} /> Data
                     </button>
                 </div>
 
@@ -151,6 +170,51 @@ export function SettingsModal() {
                                 </p>
                                 <p style={{ fontSize: '0.875rem', color: '#6B7280' }}>
                                     Designed for maximum productivity.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'data' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                            <div>
+                                <h4 style={{ margin: '0 0 4px', fontSize: '1rem', color: '#374151' }}>Export Your Data</h4>
+                                <p style={{ margin: 0, fontSize: '0.875rem', color: '#6B7280' }}>
+                                    Download all your items, tasks, and lists.
+                                </p>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                {(['json', 'markdown', 'html'] as ExportFormat[]).map(format => (
+                                    <button
+                                        key={format}
+                                        onClick={() => {
+                                            try {
+                                                exportData(items, tasks, lists, format);
+                                                addNotification('success', `Exported as ${format.toUpperCase()}`, 'Download started');
+                                            } catch {
+                                                addNotification('error', 'Export failed', 'Could not export your data');
+                                            }
+                                        }}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: 10,
+                                            padding: '12px 16px', borderRadius: 8,
+                                            border: '1px solid #D1D5DB', background: 'white',
+                                            cursor: 'pointer', color: '#374151', fontSize: '0.9rem',
+                                        }}
+                                    >
+                                        <Download size={16} />
+                                        Export as {format.toUpperCase()}
+                                        <span style={{ marginLeft: 'auto', color: '#9CA3AF', fontSize: '0.8rem' }}>
+                                            .{format === 'markdown' ? 'md' : format}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div style={{ background: '#F9FAFB', padding: 16, borderRadius: 8, border: '1px solid #E5E7EB' }}>
+                                <p style={{ margin: 0, fontSize: '0.8rem', color: '#6B7280' }}>
+                                    📊 {items.length} items · {tasks.length} tasks · {lists.length} lists
                                 </p>
                             </div>
                         </div>

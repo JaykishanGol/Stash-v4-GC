@@ -4,6 +4,18 @@
  * Manages Google OAuth refresh tokens for persistent authentication.
  * Stores refresh_token in user_settings and exchanges for new access_token
  * via Netlify function when the current token expires.
+ * 
+ * SECURITY NOTE:
+ * Tokens are stored plaintext in Supabase user_settings table, protected by RLS.
+ * This is acceptable because:
+ * 1. RLS ensures only the owning user can read their own tokens
+ * 2. Refresh tokens alone cannot access data without the client_secret (stored server-side)
+ * 3. The token exchange happens via Netlify function which holds the secret
+ * 
+ * Future improvements could include:
+ * - Column-level encryption via Supabase Vault
+ * - Token rotation on each refresh
+ * - Automatic revocation on suspicious activity
  */
 
 import { supabase } from './supabase';

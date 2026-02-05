@@ -1,5 +1,10 @@
 import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching'
+import { registerRoute } from 'workbox-routing'
+import { CacheFirst, StaleWhileRevalidate, NetworkFirst } from 'workbox-strategies'
+import { ExpirationPlugin } from 'workbox-expiration'
+import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 import { clientsClaim } from 'workbox-core'
+import { SHARE_DB_NAME, SHARE_STORE_NAME, SHARE_DB_VERSION } from './lib/shareDbConfig'
 
 // Immediately claim all clients
 self.skipWaiting()
@@ -7,6 +12,69 @@ clientsClaim()
 
 cleanupOutdatedCaches()
 precacheAndRoute(self.__WB_MANIFEST)
+
+// ============ Runtime Caching Strategies ============
+
+// Cache Google Fonts stylesheets (StaleWhileRevalidate)
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.googleapis.com',
+  new StaleWhileRevalidate({
+    cacheName: 'google-fonts-stylesheets',
+  })
+)
+
+// Cache Google Fonts webfonts (CacheFirst, long-lived)
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.gstatic.com',
+  new CacheFirst({
+    cacheName: 'google-fonts-webfonts',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 }), // 1 year
+    ],
+  })
+)
+
+// Cache Supabase Storage images (CacheFirst with size limit)
+registerRoute(
+  ({ url }) => url.hostname.endsWith('.supabase.co') && url.pathname.includes('/storage/'),
+  new CacheFirst({
+    cacheName: 'supabase-images',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 }), // 30 days
+    ],
+  })
+)
+
+// Cache external link preview images (StaleWhileRevalidate with limit)
+registerRoute(
+  ({ request, url }) =>
+    request.destination === 'image' &&
+    url.origin !== self.location.origin,
+  new StaleWhileRevalidate({
+    cacheName: 'external-images',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 7 }), // 7 days
+    ],
+  })
+)
+
+// Cache Supabase API responses (NetworkFirst with short cache for offline)
+registerRoute(
+  ({ url }) =>
+    url.hostname.endsWith('.supabase.co') &&
+    url.pathname.startsWith('/rest/'),
+  new NetworkFirst({
+    cacheName: 'supabase-api',
+    networkTimeoutSeconds: 5,
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 60 * 60 }), // 1 hour
+    ],
+  })
+)
 
 // Log SW lifecycle for debugging
 self.addEventListener('install', (event) => {
@@ -19,14 +87,10 @@ self.addEventListener('activate', (event) => {
 
 // --- Share Target Handler ---
 
-const SHARE_DB_NAME = 'stash-share-db';
-const SHARE_STORE_NAME = 'shares';
-const DB_VERSION = 2; // Bumped to ensure clean migration
-
 // Open DB helper
 function openShareDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SHARE_DB_NAME, DB_VERSION);
+    const request = indexedDB.open(SHARE_DB_NAME, SHARE_DB_VERSION);
     
     request.onupgradeneeded = (event) => {
       const db = event.target.result;

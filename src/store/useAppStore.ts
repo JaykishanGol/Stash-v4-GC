@@ -1,25 +1,22 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { createAuthSlice } from './slices/authSlice';
-import type { AuthSlice } from './slices/authSlice';
 import { createUISlice } from './slices/uiSlice';
-import type { UISlice } from './slices/uiSlice';
 import { createDataSlice } from './slices/dataSlice';
-import type { DataSlice } from './slices/dataSlice';
 import { createSelectionSlice } from './slices/selectionSlice';
-import type { SelectionSlice } from './slices/selectionSlice';
-import type { Item, Task } from '../lib/types';
-import { FOLDERS_ROOT_ID } from '../lib/types';
+import { createTaskSlice } from './slices/taskSlice';
+import { createClipboardUndoSlice } from './slices/clipboardUndoSlice';
+import type { Item } from '../lib/types';
 import { persistentSyncQueue } from '../lib/persistentQueue';
 import { tombstoneManager } from '../lib/tombstones';
+import { adaptItemRows, adaptTaskRows, adaptListRows } from '../lib/dbAdapters';
+import { STORAGE_KEY } from '../lib/constants';
+import { computeFilteredItems, computeFilteredTasks } from '../lib/filterUtils';
+import { idbStorage } from '../lib/idbStorage';
+import type { AppState } from './types';
 
-// Define the full application state
-export type AppState = AuthSlice & UISlice & DataSlice & SelectionSlice & {
-    // Computed (Selectors)
-    getFilteredItems: (overrideListId?: string | null) => Item[];
-    getFilteredTasks: () => Task[];
-    loadUserData: () => Promise<void>;
-};
+// Re-export AppState for consumers
+export type { AppState } from './types';
 
 export const useAppStore = create<AppState>()(
     persist(
@@ -28,229 +25,17 @@ export const useAppStore = create<AppState>()(
             ...createUISlice(set, get, api),
             ...createDataSlice(set, get, api),
             ...createSelectionSlice(set, get, api),
+            ...createTaskSlice(set, get, api),
+            ...createClipboardUndoSlice(set, get, api),
 
             // ============ COMPUTED IMPLEMENTATIONS ============
 
             getFilteredItems: (overrideListId?: string | null) => {
-                const state = get();
-
-                // TRASH VIEW SPECIAL HANDLING
-                if (state.activeView === 'trash') {
-                    let filtered = [...state.trashedItems];
-
-                    // Apply Search
-                    if (state.searchQuery) {
-                        const query = state.searchQuery.toLowerCase();
-                        const stripHtml = (html: string): string => html.replace(/<[^>]*>/g, '');
-
-                        filtered = filtered.filter(item => {
-                            if (item.title.toLowerCase().includes(query)) return true;
-                            if (item.type === 'note' && item.content && typeof item.content === 'object') {
-                                const noteContent = item.content as { text?: string };
-                                if (noteContent.text && stripHtml(noteContent.text).toLowerCase().includes(query)) return true;
-                            }
-                            return false;
-                        });
-                    }
-                    
-                    // Sort by deletion time (updated_at)
-                    filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-                    
-                    return filtered;
-                }
-
-                // Filter out trashed items by default (they are in trashedItems)
-                let filtered = state.items.filter(item => !item.deleted_at);
-
-                // Archive Logic
-                if (state.activeView === 'archive') {
-                    // In archive view, show ONLY archived items
-                    filtered = filtered.filter(item => item.is_archived);
-                } else if (state.searchQuery) {
-                    // During search, INCLUDE archived items (Keep-style)
-                    // No filter needed, perform search on full set
-                } else {
-                    // Normal views: HIDE archived items
-                    filtered = filtered.filter(item => !item.is_archived);
-                }
-
-                const effectiveListId = overrideListId !== undefined ? overrideListId : state.selectedListId;
-
-                // PRIORITY 1: List filtering (highest priority)
-                if (effectiveListId) {
-                    const list = state.lists.find(l => l.id === effectiveListId);
-                    if (list) {
-                        filtered = filtered.filter(item => list.items.includes(item.id));
-                    } else {
-                        // List selected but not found? Return empty to avoid leaking "All Items"
-                        filtered = [];
-                    }
-                    // STRICT RETURN: Do not apply folder or view logic if we are in "List Mode"
-                    // We only apply search/type/priority filters below.
-                }
-                // PRIORITY 2: Folder filtering
-                else if (state.selectedFolderId) {
-                    filtered = filtered.filter(item => item.folder_id === state.selectedFolderId);
-                }
-                // PRIORITY 3: View-based filtering
-                else {
-                    switch (state.activeView) {
-                        case 'notes':
-                            filtered = filtered.filter(i => i.type === 'note' && i.folder_id === null);
-                            break;
-                        case 'links':
-                            filtered = filtered.filter(i => i.type === 'link' && i.folder_id === null);
-                            break;
-                        case 'files':
-                            filtered = filtered.filter(i => i.type === 'file' && i.folder_id === null);
-                            break;
-                        case 'images':
-                            filtered = filtered.filter(i => i.type === 'image' && i.folder_id === null);
-                            break;
-                        case 'folders':
-                            // Show: folder items + items moved to folders section root
-                            filtered = filtered.filter(i =>
-                                i.type === 'folder' || i.folder_id === FOLDERS_ROOT_ID
-                            );
-                            break;
-                        case 'overdue': {
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
-                            filtered = filtered.filter(i => i.scheduled_at && !i.is_completed && new Date(i.scheduled_at) < today);
-                            break;
-                        }
-                        case 'completed':
-                            filtered = filtered.filter(i => i.is_completed === true);
-                            break;
-                        case 'home':
-                            // Home dashboard: Show root items only (not in folders)
-                            filtered = filtered.filter(i => i.folder_id === null);
-                            break;
-                        case 'all':
-                            // All Items: Show everything (no additional filter)
-                            break;
-                        case 'scheduled':
-                            // Show all scheduled items
-                            filtered = filtered.filter(i => i.scheduled_at && !i.is_completed);
-                            break;
-                        default:
-                            // For any unhandled view, show all items
-                            break;
-                    }
-                }
-
-                // Apply search
-                if (state.searchQuery) {
-                    const query = state.searchQuery.toLowerCase();
-                    const stripHtml = (html: string): string => html.replace(/<[^>]*>/g, '');
-
-                    filtered = filtered.filter(item => {
-                        // Title match
-                        if (item.title.toLowerCase().includes(query)) return true;
-
-                        // Content match with HTML stripping
-                        if (item.type === 'note' && item.content && typeof item.content === 'object') {
-                            const noteContent = item.content as { text?: string };
-                            if (noteContent.text && stripHtml(noteContent.text).toLowerCase().includes(query)) {
-                                return true;
-                            }
-                        }
-
-                        // URL match for links
-                        if (item.type === 'link' && item.content && typeof item.content === 'object') {
-                            const linkContent = item.content as { url?: string };
-                            if (linkContent.url?.toLowerCase().includes(query)) {
-                                return true;
-                            }
-                        }
-
-                        // Tag match
-                        if (item.tags?.some(tag => tag.toLowerCase().includes(query))) {
-                            return true;
-                        }
-
-                        return false;
-                    });
-                }
-
-                // Apply type filter
-                if (state.filters.type) {
-                    filtered = filtered.filter(item => item.type === state.filters.type);
-                }
-
-                // Apply priority filter
-                if (state.filters.priority) {
-                    filtered = filtered.filter(item => item.priority === state.filters.priority);
-                }
-
-                // Sort: pinned first, then by updated_at
-                filtered.sort((a, b) => {
-                    if (a.is_pinned && !b.is_pinned) return -1;
-                    if (!a.is_pinned && b.is_pinned) return 1;
-                    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-                });
-
-                return filtered;
+                return computeFilteredItems(get(), overrideListId);
             },
 
             getFilteredTasks: () => {
-                const state = get();
-                // Filter out soft-deleted tasks (moved to trash)
-                let filtered = state.tasks.filter(t => !t.deleted_at);
-
-                // PRIORITY 1: List filtering
-                if (state.selectedListId) {
-                    filtered = filtered.filter(t => t.list_id === state.selectedListId);
-                }
-
-                // Active vs Completed
-                if (state.activeView === 'completed') {
-                    filtered = filtered.filter(t => t.is_completed);
-                } else {
-                    filtered = filtered.filter(t => !t.is_completed);
-                }
-
-                // View-based filtering
-                switch (state.activeView) {
-                    case 'overdue': {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        filtered = filtered.filter(t => t.scheduled_at && !t.is_completed && new Date(t.scheduled_at) < today);
-                        break;
-                    }
-                    case 'scheduled': {
-                        // Show all tasks with scheduled_at
-                        filtered = filtered.filter(t => t.scheduled_at);
-                        break;
-                    }
-                    case 'tasks':
-                    case 'all':
-                        // Show all active tasks
-                        break;
-                    case 'trash':
-                    case 'notes':
-                    case 'links':
-                    case 'files':
-                    case 'images':
-                    case 'folders':
-                        // Tasks don't appear in these views
-                        return [];
-                    default:
-                        break;
-                }
-
-                // Search
-                if (state.searchQuery) {
-                    const query = state.searchQuery.toLowerCase();
-                    filtered = filtered.filter(t => t.title.toLowerCase().includes(query));
-                }
-
-                // Apply priority filter
-                if (state.filters.priority) {
-                    filtered = filtered.filter(t => t.priority === state.filters.priority);
-                }
-
-                return filtered;
+                return computeFilteredTasks(get());
             },
 
             loadUserData: async () => {
@@ -296,7 +81,7 @@ export const useAppStore = create<AppState>()(
                         .select('*')
                         .eq('user_id', user.id);
 
-                    const allItems = (itemsData || []) as Item[];
+                    const allItems = adaptItemRows(itemsData || []);
 
                     // SMART MERGE: Preserve local items that haven't synced yet
                     const { items: localItems } = get();
@@ -327,22 +112,19 @@ export const useAppStore = create<AppState>()(
                     // We pass the IDs that DO exist on server to prune. Logic: Keep T if T in Server.
                     tombstoneManager.prune(Array.from(serverIdSet));
 
-                    const activeItems = finalItems.filter((i: any) => !i.deleted_at);
-                    const trashedItems = finalItems.filter((i: any) => i.deleted_at);
+                    const activeItems = finalItems.filter((i: Item) => !i.deleted_at);
+                    const trashedItems = finalItems.filter((i: Item) => i.deleted_at);
 
-                    // Ensure task fields are initialized
-                    const sanitizedTasks = (tasksData || []).map((t: any) => ({
-                        ...t,
-                        item_ids: t.item_ids || [],
-                        item_completion: t.item_completion || {}
-                    }));
+                    // Use adapters for proper type conversion
+                    const sanitizedTasks = adaptTaskRows(tasksData || []);
+                    const sanitizedLists = adaptListRows(listsData || []);
 
                     const hasMore = count ? count > PAGE_SIZE : false;
 
                     set({
                         items: activeItems,
                         trashedItems: trashedItems,
-                        lists: listsData || [],
+                        lists: sanitizedLists,
                         tasks: sanitizedTasks,
                         isLoading: false,
                         hasMoreItems: hasMore,
@@ -358,7 +140,26 @@ export const useAppStore = create<AppState>()(
             },
         }),
         {
-            name: 'stash-storage',
+            name: STORAGE_KEY,
+            storage: createJSONStorage(() => idbStorage),
+            version: 1, // Increment when persisted shape changes
+            migrate: (persisted: unknown, version: number) => {
+                const state = persisted as Record<string, unknown>;
+
+                if (version === 0 || !version) {
+                    // v0 → v1: Ensure arrays exist (guards against corrupt/stale data)
+                    return {
+                        ...state,
+                        items: Array.isArray(state.items) ? state.items : [],
+                        trashedItems: Array.isArray(state.trashedItems) ? state.trashedItems : [],
+                        folders: Array.isArray(state.folders) ? state.folders : [],
+                        lists: Array.isArray(state.lists) ? state.lists : [],
+                        tasks: Array.isArray(state.tasks) ? state.tasks : [],
+                    };
+                }
+
+                return state;
+            },
             partialize: (state) => ({
                 theme: state.theme,
                 viewMode: state.viewMode,

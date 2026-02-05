@@ -69,8 +69,8 @@ export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect }: Ca
                 <div className="mini-cal-header">
                     <span className="mini-cal-title">{format(miniCalDate, 'MMMM yyyy')}</span>
                     <div className="mini-cal-nav">
-                        <button onClick={() => setMiniCalDate(d => subMonths(d, 1))}><ChevronLeft size={16} /></button>
-                        <button onClick={() => setMiniCalDate(d => addMonths(d, 1))}><ChevronRight size={16} /></button>
+                        <button onClick={() => setMiniCalDate(d => subMonths(d, 1))} aria-label="Previous month"><ChevronLeft size={16} /></button>
+                        <button onClick={() => setMiniCalDate(d => addMonths(d, 1))} aria-label="Next month"><ChevronRight size={16} /></button>
                     </div>
                 </div>
                 <div className="mini-cal-grid">

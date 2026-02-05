@@ -1,18 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { Router } from 'wouter';
 import { Layout } from './components/layout/Layout';
 import { QuickAddModal } from './components/modals/QuickAddModal';
-import { SchedulerModal } from './components/modals/SchedulerModal';
-import { InfoPanel } from './components/modals/InfoPanel';
-import { FilePreviewModal } from './components/modals/FilePreviewModal';
 import { AuthModal } from './components/auth/AuthModal';
-import { SettingsModal } from './components/modals/SettingsModal';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { ToastListener } from './components/ui/ToastListener';
 import { BulkActionsBar } from './components/ui/BulkActionsBar';
 import { AppErrorBoundary } from './components/ui/AppErrorBoundary';
+import { ComponentErrorBoundary } from './components/ui/ComponentErrorBoundary';
 import { NotificationCenter } from './components/ui/NotificationCenter';
-import { ShareIntentModal } from './components/modals/ShareIntentModal';
 import { DragDropOverlay } from './components/capture/CaptureEngine';
 import { useSmartPaste } from './hooks/useSmartPaste';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -23,7 +19,23 @@ import { useMobileBackHandler } from './hooks/useMobileBackHandler';
 import { useRealtimeSubscription } from './hooks/useRealtime';
 import { persistentSyncQueue } from './lib/persistentQueue';
 import { getPendingShares, processShare, clearPendingShares } from './lib/shareHandler';
+import { isSupabaseConfigured } from './lib/supabase';
 import './index.css';
+
+// Lazy-loaded modals for better initial bundle size
+const SchedulerModal = lazy(() => import('./components/modals/SchedulerModal').then(m => ({ default: m.SchedulerModal })));
+const InfoPanel = lazy(() => import('./components/modals/InfoPanel').then(m => ({ default: m.InfoPanel })));
+const FilePreviewModal = lazy(() => import('./components/modals/FilePreviewModal').then(m => ({ default: m.FilePreviewModal })));
+const SettingsModal = lazy(() => import('./components/modals/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const ShareIntentModal = lazy(() => import('./components/modals/ShareIntentModal').then(m => ({ default: m.ShareIntentModal })));
+
+// Production environment check - warn if Supabase is misconfigured
+if (import.meta.env.PROD && !isSupabaseConfigured()) {
+  console.error(
+    '[CRITICAL] Supabase is not configured in production! ' +
+    'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.'
+  );
+}
 
 function App() {
   // Initialize auth and capture hooks
@@ -143,10 +155,23 @@ function App() {
           <ToastListener />
           <Layout />
           <QuickAddModal />
-          <SchedulerModal />
-          <InfoPanel />
-          <FilePreviewModal />
-          <ShareIntentModal />
+          <Suspense fallback={null}>
+            <ComponentErrorBoundary name="Scheduler" compact>
+              <SchedulerModal />
+            </ComponentErrorBoundary>
+            <ComponentErrorBoundary name="Info Panel" compact>
+              <InfoPanel />
+            </ComponentErrorBoundary>
+            <ComponentErrorBoundary name="File Preview" compact>
+              <FilePreviewModal />
+            </ComponentErrorBoundary>
+            <ComponentErrorBoundary name="Share" compact>
+              <ShareIntentModal />
+            </ComponentErrorBoundary>
+            <ComponentErrorBoundary name="Settings" compact>
+              <SettingsModal />
+            </ComponentErrorBoundary>
+          </Suspense>
           <BulkActionsBar />
           <DragDropOverlay />
 
@@ -169,7 +194,6 @@ function App() {
             onClose={closeAuthModal}
             onSuccess={loadUserData}
           />
-          <SettingsModal />
         </ToastProvider>
       </Router>
     </AppErrorBoundary>

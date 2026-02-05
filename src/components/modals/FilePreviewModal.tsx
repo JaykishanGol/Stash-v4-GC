@@ -298,9 +298,9 @@ export function FilePreviewModal() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {type === 'image' && (
                             <div style={{ display: 'flex', gap: 4, marginRight: 16, background: '#333', borderRadius: 6, padding: 2 }}>
-                                <button onClick={() => setScale(s => Math.max(0.5, s - 0.25))} className="icon-btn-sm"><ZoomOut size={16} /></button>
+                                <button onClick={() => setScale(s => Math.max(0.5, s - 0.25))} className="icon-btn-sm" aria-label="Zoom out"><ZoomOut size={16} /></button>
                                 <span style={{ color: '#aaa', fontSize: '0.75rem', display: 'flex', alignItems: 'center', minWidth: 40, justifyContent: 'center' }}>{Math.round(scale * 100)}%</span>
-                                <button onClick={() => setScale(s => Math.min(3, s + 0.25))} className="icon-btn-sm"><ZoomIn size={16} /></button>
+                                <button onClick={() => setScale(s => Math.min(3, s + 0.25))} className="icon-btn-sm" aria-label="Zoom in"><ZoomIn size={16} /></button>
                             </div>
                         )}
                         <button onClick={() => fileInputRef.current?.click()} className="icon-btn" title="Replace File (Upload New Version)">

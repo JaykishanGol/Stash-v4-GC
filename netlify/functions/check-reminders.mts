@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // Configure web-push with VAPID keys
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:gjaykishan@gmail.com';
+const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@example.com';
 
 if (vapidPublicKey && vapidPrivateKey) {
     webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
@@ -58,18 +58,38 @@ export default async (req, context) => {
             byUser[item.user_id].push(item);
         }
 
+        // BATCH: Fetch all push subscriptions for all affected users in ONE query
+        const userIds = Object.keys(byUser);
+        if (userIds.length === 0) {
+            return new Response(JSON.stringify({
+                success: true,
+                processed: 0,
+                timestamp: now
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        const { data: allSubscriptions, error: subError } = await supabase
+            .from('push_subscriptions')
+            .select('user_id, endpoint, p256dh, auth')
+            .in('user_id', userIds);
+
+        if (subError) {
+            console.error('[check-reminders] Error fetching subscriptions:', subError);
+        }
+
+        // Index subscriptions by user_id for O(1) lookup
+        const subsByUser: Record<string, typeof allSubscriptions> = {};
+        for (const sub of (allSubscriptions || [])) {
+            if (!subsByUser[sub.user_id]) subsByUser[sub.user_id] = [];
+            subsByUser[sub.user_id].push(sub);
+        }
+
         // Send notifications for each user
         for (const [userId, items] of Object.entries(byUser)) {
-            // Get user's push subscriptions
-            const { data: subscriptions, error: subError } = await supabase
-                .from('push_subscriptions')
-                .select('endpoint, p256dh, auth')
-                .eq('user_id', userId);
-
-            if (subError) {
-                console.error(`[check-reminders] Error getting subscriptions for ${userId}:`, subError);
-                continue;
-            }
+            const subscriptions = subsByUser[userId];
 
             if (!subscriptions || subscriptions.length === 0) {
                 console.log(`[check-reminders] No subscriptions for user ${userId}`);

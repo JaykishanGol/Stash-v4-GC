@@ -97,7 +97,7 @@ class PersistentQueue {
         if (this.processingTimes.length > 100) {
             this.processingTimes.shift();
         }
-        this.stats.avgProcessingTimeMs = 
+        this.stats.avgProcessingTimeMs =
             this.processingTimes.reduce((a, b) => a + b, 0) / this.processingTimes.length;
     }
 
@@ -136,7 +136,7 @@ class PersistentQueue {
         // INTELLIGENT DEDUPLICATION (The "Resurrection" Fix)
         // If we are deleting, we must remove ANY pending upsert for this item.
         // If we are upserting, we remove previous upserts (but a pending delete would be weird, implying undelete).
-        
+
         if (type.startsWith('delete-')) {
             // Remove ALL operations for this ID (both upserts and previous deletes)
             // This ensures the Delete is the FINAL word.
@@ -188,12 +188,12 @@ class PersistentQueue {
                 // Success! Remove from queue
                 this.queue.shift();
                 this.saveToStorage();
-                
+
                 // Update stats
                 this.stats.totalProcessed++;
                 this.stats.lastProcessedAt = new Date().toISOString();
                 this.recordProcessingTime(Date.now() - startTime);
-                
+
                 console.log(`[Queue] Operation ${op.type} for ${op.id} succeeded.`);
 
                 // Gradually reduce delay on success (adaptive rate limiting)
@@ -227,7 +227,7 @@ class PersistentQueue {
                     this.currentDelayMs = Math.min(MAX_DELAY_MS, this.currentDelayMs * DELAY_INCREASE_FACTOR);
                     this.stats.last429At = new Date().toISOString();
                     this.saveStats();
-                    
+
                     // Wait with exponential backoff before retrying
                     await new Promise(resolve => setTimeout(resolve, this.currentDelayMs));
                     continue; // Retry the same operation
@@ -305,15 +305,30 @@ class PersistentQueue {
             if (type === 'upsert-list') {
                 ALLOWED_KEYS = ['id', 'user_id', 'name', 'color', 'order', 'items', 'created_at', 'item_count'];
             } else if (type === 'upsert-task') {
-                // Task fields (simplified scheduler)
-                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'title', 'description', 'color', 'priority', 'scheduled_at', 'remind_before', 'recurring_config', 'item_ids', 'item_completion', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'tags'];
+                // Task fields (simplified scheduler) - REMOVED remind_before
+                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'item_ids', 'item_completion', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'tags'];
             } else if (type === 'upsert-item') {
-                // Item fields (simplified scheduler)
-                ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'remind_before', 'recurring_config', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
+                // Item fields (simplified scheduler) - REMOVED remind_before
+                ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'recurring_config', 'remind_at', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
             }
 
             // Filter entries
             if (ALLOWED_KEYS.length > 0) {
+                // DB SCHEMA FIX: Map 'remind_before' (UI) to 'remind_at' (DB) if needed
+                if ('remind_before' in payload && payload.scheduled_at && typeof payload.remind_before === 'number') {
+                    // Only set remind_at if not explicitly provided
+                    if (!payload.remind_at) {
+                        try {
+                            const scheduledTime = new Date(payload.scheduled_at).getTime();
+                            const remindTime = scheduledTime - (payload.remind_before * 60 * 1000);
+                            payload.remind_at = new Date(remindTime).toISOString();
+                            console.log(`[Queue] Mapped remind_before (${payload.remind_before}m) to remind_at (${payload.remind_at})`);
+                        } catch (e) {
+                            console.warn('[Queue] Failed to map remind_before to remind_at', e);
+                        }
+                    }
+                }
+
                 const cleanEntries = entries.filter(([k]) =>
                     !COMMON_FORBIDDEN.includes(k) && ALLOWED_KEYS.includes(k)
                 );
@@ -387,7 +402,7 @@ class PersistentQueue {
         const idSet = new Set(ids);
         const originalCount = this.queue.length;
         this.queue = this.queue.filter(op => !idSet.has(op.id));
-        
+
         if (this.queue.length !== originalCount) {
             console.log(`[Queue] Cleared pending operations for ${originalCount - this.queue.length} items`);
             this.saveToStorage();

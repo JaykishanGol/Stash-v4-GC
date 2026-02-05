@@ -190,7 +190,7 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
                 {/* HEADER */}
                 <div className="card-header">
                     <div className="drag-handle" />
-                    <button className="close-btn" onClick={onClose}><X size={20} /></button>
+                    <button className="close-btn" onClick={onClose} aria-label="Close"><X size={20} /></button>
                 </div>
 
                 {/* GOOGLE CONNECT BANNER - Show when not connected */}

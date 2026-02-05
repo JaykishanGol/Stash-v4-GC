@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X, Mail, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useAppStore } from '../../store/useAppStore';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface AuthModalProps {
     isOpen: boolean;
@@ -18,7 +19,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     const [password, setPassword] = useState('');
     const [status, setStatus] = useState<AuthStatus>('idle');
     const [message, setMessage] = useState('');
-
+    const trapRef = useFocusTrap<HTMLDivElement>(isOpen);
     // Close sidebar on mobile when modal opens
     useEffect(() => {
         if (isOpen && window.innerWidth < 768) {
@@ -110,7 +111,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     return (
         <div className="modal-overlay active" onClick={onClose} style={{ zIndex: 9999 }}>
-            <div className="modal" style={{ width: 'min(420px, 90vw)', maxWidth: 420, zIndex: 9999, position: 'relative' }} onClick={e => e.stopPropagation()}>
+            <div ref={trapRef} className="modal" style={{ width: 'min(420px, 90vw)', maxWidth: 420, zIndex: 9999, position: 'relative' }} onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="modal-header">
                     <div>

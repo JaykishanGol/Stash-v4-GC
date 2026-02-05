@@ -174,7 +174,7 @@ export function InfoPanel() {
                             History
                         </button>
                     </div>
-                    <button className="info-panel-close" onClick={closeInfoPanel}>
+                    <button className="info-panel-close" onClick={closeInfoPanel} aria-label="Close">
                         <X size={20} />
                     </button>
                 </div>

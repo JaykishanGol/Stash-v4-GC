@@ -40,8 +40,15 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     const rateLimitResult = checkRateLimit(`token-refresh:${clientIP}`, RATE_LIMIT_CONFIG);
     
     // CORS headers with rate limit info
+    // Restrict origin to deployed site or localhost for development
+    const allowedOrigin = process.env.SITE_URL || process.env.URL || 'https://stash-app.netlify.app';
+    const requestOrigin = (event.headers as Record<string, string>)['origin'] || '';
+    const corsOrigin = requestOrigin === allowedOrigin || requestOrigin.startsWith('http://localhost')
+        ? requestOrigin
+        : allowedOrigin;
+
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Content-Type': 'application/json',
@@ -77,8 +84,17 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     }
 
     try {
-        // Parse request body
-        const body: RefreshRequest = JSON.parse(event.body || '{}');
+        // Parse request body with validation
+        let body: RefreshRequest;
+        try {
+            body = JSON.parse(event.body || '{}');
+        } catch {
+            return {
+                statusCode: 400,
+                headers,
+                body: JSON.stringify({ error: 'Invalid JSON body' }),
+            };
+        }
         const { refresh_token } = body;
 
         if (!refresh_token) {

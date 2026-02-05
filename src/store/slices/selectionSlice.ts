@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import type { AppState } from '../types';
 
 export interface SelectionSlice {
     selectedItemIds: string[];
@@ -12,7 +13,7 @@ export interface SelectionSlice {
     clearSelection: () => void;
 }
 
-export const createSelectionSlice: StateCreator<SelectionSlice> = (set, get) => ({
+export const createSelectionSlice: StateCreator<AppState, [], [], SelectionSlice> = (set, get) => ({
     selectedItemIds: [],
     isSelectionMode: false,
     lastSelectedItemId: null,
@@ -25,7 +26,7 @@ export const createSelectionSlice: StateCreator<SelectionSlice> = (set, get) => 
     },
 
     selectItem: (id, multiSelect = false, shiftKey = false) => {
-        const state = get() as any; // Access full store
+        const state = get();
         const { selectedItemIds, lastSelectedItemId, items } = state;
 
         // 1. Shift-Click (Range Selection)

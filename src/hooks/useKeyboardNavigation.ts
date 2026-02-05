@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
-import { useFilteredItems } from './useFilteredItems';
 
 /**
  * Premium keyboard navigation hook
@@ -18,8 +17,9 @@ export function useKeyboardNavigation() {
         activeView
     } = useAppStore();
 
-    // Use memoized visual list for correct spatial navigation
-    const { items: visibleItems } = useFilteredItems();
+    // Get function reference (stable) then call it — avoids infinite loop from calling inside selector
+    const getFilteredItems = useAppStore(s => s.getFilteredItems);
+    const visibleItems = getFilteredItems();
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
 
     // Reset focus when view or content changes drastically

@@ -126,7 +126,7 @@ export function CustomRecurrenceModal({
             <div className="recurrence-modal" onClick={e => e.stopPropagation()}>
                 <div className="recurrence-header">
                     <h3>Custom recurrence</h3>
-                    <button className="close-btn" onClick={onClose}>
+                    <button className="close-btn" onClick={onClose} aria-label="Close">
                         <X size={20} />
                     </button>
                 </div>

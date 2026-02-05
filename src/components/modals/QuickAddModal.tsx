@@ -15,11 +15,12 @@ import {
 import { useAppStore } from '../../store/useAppStore';
 import type { Item, ChecklistItem, CardColor } from '../../lib/types';
 import { CARD_COLORS, getColorKey } from '../../lib/types';
-import { generateId, isValidUrl, isImageFile, htmlToPlainText } from '../../lib/utils';
+import { generateId, isValidUrl, htmlToPlainText } from '../../lib/utils';
 import { RichTextEditor } from '../editor/RichTextEditor';
 import { ChecklistEditor } from '../editor/ChecklistEditor';
 import { fetchLinkMetadata, type LinkMetadata } from '../../lib/fetchLinkMetadata';
 import { SchedulerContent } from './SchedulerModal';
+import { uploadFilesAsItems } from '../../lib/uploadUtils';
 
 type TabType = 'note' | 'link' | 'file' | 'image' | 'folder';
 
@@ -350,7 +351,7 @@ export function QuickAddModal() {
                     {/* Header */}
                     <div className="content-header">
                         {/* Mobile Cancel Button */}
-                        <button className="mobile-only icon-btn" onClick={handleClose} style={{ marginRight: 16 }}>
+                        <button className="mobile-only icon-btn" onClick={handleClose} style={{ marginRight: 16 }} aria-label="Cancel">
                             <X size={24} />
                         </button>
 
@@ -380,7 +381,7 @@ export function QuickAddModal() {
                         )}
 
                         {/* Mobile Save Button */}
-                        <button className="mobile-only icon-btn save-btn" onClick={handleSubmit} style={{ color: 'var(--accent)', fontWeight: 'bold' }}>
+                        <button className="mobile-only icon-btn save-btn" onClick={handleSubmit} style={{ color: 'var(--accent)', fontWeight: 'bold' }} aria-label="Save">
                             <Check size={24} />
                         </button>
                     </div>
@@ -505,59 +506,11 @@ export function QuickAddModal() {
                                         onChange={async (e) => {
                                             const files = e.target.files;
                                             if (files && files.length > 0) {
-                                                handleClose(); // Close modal immediately to show toast
-
-                                                Array.from(files).forEach(async (file) => {
-                                                    const uploadId = generateId();
-                                                    const isImage = quickAddType === 'image' || isImageFile(file.type);
-
-                                                    addUpload(uploadId, file.name);
-
-                                                    try {
-                                                        const { uploadFile } = await import('../../lib/supabase');
-                                                        const { path, error } = await uploadFile(
-                                                            file,
-                                                            user?.id || 'demo',
-                                                            isImage ? 'image' : 'file',
-                                                            (progress) => updateUploadProgress(uploadId, progress, '1 MB/s')
-                                                        );
-
-                                                        if (error) throw error;
-
-                                                        completeUpload(uploadId, true);
-
-                                                        const newItem: Item = {
-                                                            id: generateId(),
-                                                            user_id: user?.id || 'demo',
-                                                            folder_id: selectedFolderId || null,
-                                                            type: isImage ? 'image' : 'file',
-                                                            title: file.name,
-                                                            content: {},
-                                                            file_meta: {
-                                                                size: file.size,
-                                                                mime: file.type,
-                                                                path: path,
-                                                                originalName: file.name,
-                                                            },
-                                                            priority: 'none',
-                                                            tags: [],
-                                                            scheduled_at: null,
-                                                            remind_before: null,
-                                                            recurring_config: null,
-
-                                                            bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
-                                                            is_pinned: false,
-                                                            is_archived: false,
-                                                            is_completed: false,
-                                                            created_at: new Date().toISOString(),
-                                                            updated_at: new Date().toISOString(),
-                                                            deleted_at: null,
-                                                        };
-                                                        addItem(newItem);
-                                                    } catch (error) {
-                                                        console.error('Upload failed:', error);
-                                                        completeUpload(uploadId, false, (error as Error).message);
-                                                    }
+                                                handleClose();
+                                                uploadFilesAsItems(files, {
+                                                    userId: user?.id || 'demo',
+                                                    folderId: selectedFolderId || null,
+                                                    addUpload, updateUploadProgress, completeUpload, addItem,
                                                 });
                                             }
                                         }}
@@ -600,7 +553,7 @@ export function QuickAddModal() {
                                                         const newFolderItem: Item = {
                                                             id: folderId,
                                                             user_id: user?.id || 'demo',
-                                                            folder_id: selectedFolderId || null, // Nest in current folder
+                                                            folder_id: selectedFolderId || null,
                                                             type: 'folder',
                                                             title: rootFolderName,
                                                             content: {
@@ -613,8 +566,7 @@ export function QuickAddModal() {
                                                             scheduled_at: null,
                                                             remind_before: null,
                                                             recurring_config: null,
-
-                                                            bg_color: '#FFFBEB', // Default folder color
+                                                            bg_color: '#FFFBEB',
                                                             is_pinned: false,
                                                             is_archived: false,
                                                             is_completed: false,
@@ -626,59 +578,10 @@ export function QuickAddModal() {
                                                         addItem(newFolderItem);
 
                                                         // 2. Upload Files into this Folder
-                                                        Array.from(files).forEach(async (file) => {
-                                                            // Skip system files like .DS_Store if visible
-                                                            if (file.name.startsWith('.')) return;
-
-                                                            const uploadId = generateId();
-                                                            const isImage = isImageFile(file.type);
-                                                            addUpload(uploadId, file.name);
-
-                                                            try {
-                                                                const { uploadFile } = await import('../../lib/supabase');
-                                                                const { path, error } = await uploadFile(
-                                                                    file,
-                                                                    user?.id || 'demo',
-                                                                    isImage ? 'image' : 'file',
-                                                                    (progress) => updateUploadProgress(uploadId, progress, '1 MB/s')
-                                                                );
-
-                                                                if (error) throw error;
-
-                                                                completeUpload(uploadId, true);
-
-                                                                const newItem: Item = {
-                                                                    id: generateId(),
-                                                                    user_id: user?.id || 'demo',
-                                                                    folder_id: folderId, // Assign to the new folder
-                                                                    type: isImage ? 'image' : 'file',
-                                                                    title: file.name,
-                                                                    content: {},
-                                                                    file_meta: {
-                                                                        size: file.size,
-                                                                        mime: file.type,
-                                                                        path: path,
-                                                                        originalName: file.name,
-                                                                    },
-                                                                    priority: 'none',
-                                                                    tags: [],
-                                                                    scheduled_at: null,
-                                                                    remind_before: null,
-                                                                    recurring_config: null,
-
-                                                                    bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
-                                                                    is_pinned: false,
-                                                                    is_archived: false,
-                                                                    is_completed: false,
-                                                                    created_at: new Date().toISOString(),
-                                                                    updated_at: new Date().toISOString(),
-                                                                    deleted_at: null,
-                                                                };
-                                                                addItem(newItem);
-                                                            } catch (error) {
-                                                                console.error('Upload failed:', error);
-                                                                completeUpload(uploadId, false, (error as Error).message);
-                                                            }
+                                                        uploadFilesAsItems(files, {
+                                                            userId: user?.id || 'demo',
+                                                            folderId,
+                                                            addUpload, updateUploadProgress, completeUpload, addItem,
                                                         });
                                                     }
                                                 };
@@ -705,56 +608,10 @@ export function QuickAddModal() {
                                                     const files = (e.target as HTMLInputElement).files;
                                                     if (files && files.length > 0) {
                                                         handleClose();
-                                                        Array.from(files).forEach(async (file) => {
-                                                            const uploadId = generateId();
-                                                            const isImage = isImageFile(file.type);
-                                                            addUpload(uploadId, file.name);
-
-                                                            try {
-                                                                const { uploadFile } = await import('../../lib/supabase');
-                                                                const { path, error } = await uploadFile(
-                                                                    file,
-                                                                    user?.id || 'demo',
-                                                                    isImage ? 'image' : 'file',
-                                                                    (progress) => updateUploadProgress(uploadId, progress, '1 MB/s')
-                                                                );
-
-                                                                if (error) throw error;
-
-                                                                completeUpload(uploadId, true);
-
-                                                                const newItem: Item = {
-                                                                    id: generateId(),
-                                                                    user_id: user?.id || 'demo',
-                                                                    folder_id: selectedFolderId || null,
-                                                                    type: isImage ? 'image' : 'file',
-                                                                    title: file.name,
-                                                                    content: {},
-                                                                    file_meta: {
-                                                                        size: file.size,
-                                                                        mime: file.type,
-                                                                        path: path,
-                                                                        originalName: file.name,
-                                                                    },
-                                                                    priority: 'none',
-                                                                    tags: [],
-                                                                    scheduled_at: null,
-                                                                    remind_before: null,
-                                                                    recurring_config: null,
-
-                                                                    bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
-                                                                    is_pinned: false,
-                                                                    is_archived: false,
-                                                                    is_completed: false,
-                                                                    created_at: new Date().toISOString(),
-                                                                    updated_at: new Date().toISOString(),
-                                                                    deleted_at: null,
-                                                                };
-                                                                addItem(newItem);
-                                                            } catch (error) {
-                                                                console.error('Upload failed:', error);
-                                                                completeUpload(uploadId, false, (error as Error).message);
-                                                            }
+                                                        uploadFilesAsItems(files, {
+                                                            userId: user?.id || 'demo',
+                                                            folderId: selectedFolderId || null,
+                                                            addUpload, updateUploadProgress, completeUpload, addItem,
                                                         });
                                                     }
                                                 };

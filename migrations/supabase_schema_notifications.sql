@@ -20,6 +20,10 @@ CREATE POLICY "Users can view their own notifications"
     ON notifications FOR SELECT
     USING (auth.uid() = user_id);
 
+CREATE POLICY "Users can insert their own notifications"
+    ON notifications FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
 CREATE POLICY "Users can update their own notifications (mark read)"
     ON notifications FOR UPDATE
     USING (auth.uid() = user_id);

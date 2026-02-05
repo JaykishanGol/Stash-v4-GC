@@ -1,6 +1,8 @@
 import type { StateCreator } from 'zustand';
 import { supabase } from '../../lib/supabase';
 import { clearSignedUrlCache } from '../../components/cards/ItemCard';
+import { STORAGE_KEY } from '../../lib/constants';
+import type { AppState } from '../types';
 
 export interface AuthSlice {
   user: { id: string; email: string } | null;
@@ -14,30 +16,31 @@ export interface AuthSlice {
   signOut: () => Promise<void>;
 }
 
-export const createAuthSlice: StateCreator<AuthSlice, [], [], AuthSlice> = (set, _get, store) => ({
+// Use AppState as the full store type for cross-slice access
+export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, get, _store) => ({
   user: null,
   isAuthModalOpen: false,
   isLoading: false,
 
   setUser: (user) => set({ user }),
-  openAuthModal: () => set({ isAuthModalOpen: true, isSidebarOpen: false } as any),
+  openAuthModal: () => set({ isAuthModalOpen: true, isSidebarOpen: false }),
   closeAuthModal: () => set({ isAuthModalOpen: false }),
   setLoading: (loading) => set({ isLoading: loading }),
   signOut: async () => {
     await supabase.auth.signOut();
     set({ user: null });
     
-    // Clear all user data from the store
-    const fullStore = store.getState() as any;
-    if (fullStore.clearAllUserData) {
-      fullStore.clearAllUserData();
+    // Clear all user data from the store (typed access to DataSlice)
+    const clearAllUserData = get().clearAllUserData;
+    if (clearAllUserData) {
+      clearAllUserData();
     }
     
     // Clear signed URL cache
     clearSignedUrlCache();
     
     // Clear persisted localStorage to prevent data rehydration
-    localStorage.removeItem('stash-storage');
+    localStorage.removeItem(STORAGE_KEY);
     
     console.log('[Auth] Signed out and cleared all user data');
   },
