@@ -12,7 +12,7 @@ import { storeGoogleRefreshToken } from '../lib/googleTokenService';
  * 2. Added useRef to track the current user ID and avoid redundant fetches.
  */
 export function useAuth() {
-    const { setUser, loadUserData, user } = useAppStore();
+    const { setUser, loadUserData, user, clearAllUserData } = useAppStore();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<Error | null>(null);
 
@@ -92,7 +92,9 @@ export function useAuth() {
                 if (updatedUser) {
                     await loadUserData();
                 } else {
-                    // Optional: Clear data on logout if store doesn't handle it
+                    // Clear all user data on sign out (handles external sign-out like tab sync)
+                    clearAllUserData();
+                    console.log('[Auth] Data cleared on identity change to signed out');
                 }
             } else {
                 // Token refreshed, but same user. Do NOTHING.
@@ -105,7 +107,7 @@ export function useAuth() {
             isMounted = false;
             subscription.unsubscribe();
         };
-    }, [setUser, loadUserData]);
+    }, [setUser, loadUserData, clearAllUserData]);
 
     return {
         user,

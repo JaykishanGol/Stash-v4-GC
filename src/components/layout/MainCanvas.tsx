@@ -43,6 +43,7 @@ const ViewLoader = () => (
 const scheduleUrlCache = new Map<string, { url: string; expiry: number }>();
 
 function ScheduleImage({ path, alt }: { path: string; alt: string }) {
+    const user = useAppStore((s) => s.user);
     const [src, setSrc] = useState<string | null>(() => {
         if (!path) return null;
         if (path.startsWith('http') || path.startsWith('blob:')) return path;
@@ -55,6 +56,11 @@ function ScheduleImage({ path, alt }: { path: string; alt: string }) {
         if (!path) return;
         if (path.startsWith('http') || path.startsWith('blob:')) {
             setSrc(path);
+            return;
+        }
+
+        // Skip storage API if user is not authenticated (prevents 400 errors)
+        if (!user || user.id === 'demo') {
             return;
         }
 
@@ -83,7 +89,7 @@ function ScheduleImage({ path, alt }: { path: string; alt: string }) {
         });
 
         return () => { isMounted = false; };
-    }, [path]);
+    }, [path, user]);
 
     if (!src) return <div className="schedule-media-fallback" />;
     return <img src={src} alt={alt} className="schedule-media-image" loading="lazy" decoding="async" />;

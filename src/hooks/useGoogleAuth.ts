@@ -105,6 +105,8 @@ export function useGoogleAuth() {
         }
 
         // Try session provider_token
+        // NOTE: We rely on Supabase's autoRefreshToken instead of explicitly calling refreshSession()
+        // Multiple simultaneous refresh calls can cause race conditions and session invalidation
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.provider_token) {
             tokenCache.current = {
@@ -113,17 +115,6 @@ export function useGoogleAuth() {
             };
             setState(prev => ({ ...prev, accessToken: session.provider_token ?? null }));
             return session.provider_token;
-        }
-
-        // Try Supabase session refresh
-        const { data: refreshedData } = await supabase.auth.refreshSession();
-        if (refreshedData.session?.provider_token) {
-            tokenCache.current = {
-                token: refreshedData.session.provider_token,
-                expiresAt: Date.now() + 3500 * 1000,
-            };
-            setState(prev => ({ ...prev, accessToken: refreshedData.session?.provider_token ?? null }));
-            return refreshedData.session.provider_token;
         }
 
         // Use stored refresh token
@@ -187,8 +178,10 @@ export function useGoogleAuth() {
         checkConnection();
 
         // Re-check when auth state changes
+        // NOTE: Do NOT check on TOKEN_REFRESHED - this causes race conditions with
+        // multiple refresh attempts that can invalidate the session
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+            if (event === 'SIGNED_IN') {
                 checkConnection();
             } else if (event === 'SIGNED_OUT') {
                 tokenCache.current = null;

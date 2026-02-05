@@ -191,7 +191,14 @@ function TagsDisplay({ tags }: { tags: string[] }) {
 // Cache expires after 50 minutes (signed URLs valid for 60 min)
 const signedUrlCache = new Map<string, { url: string; expiry: number }>();
 
+/** Clear the signed URL cache (called on sign out) */
+export function clearSignedUrlCache() {
+    signedUrlCache.clear();
+    console.log('[ItemCard] Cleared signed URL cache');
+}
+
 function SecureImage({ path, alt, style }: { path: string; alt: string; style?: React.CSSProperties }) {
+    const user = useAppStore((s) => s.user);
     const [src, setSrc] = useState<string | null>(() => {
         // Check cache on initial render
         if (!path) return null;
@@ -205,6 +212,11 @@ function SecureImage({ path, alt, style }: { path: string; alt: string; style?: 
         if (!path) return;
         if (path.startsWith('http') || path.startsWith('blob:')) {
             setSrc(path);
+            return;
+        }
+
+        // Skip storage API calls if user is not authenticated (prevents 400 errors)
+        if (!user || user.id === 'demo') {
             return;
         }
 
@@ -235,7 +247,7 @@ function SecureImage({ path, alt, style }: { path: string; alt: string; style?: 
         });
 
         return () => { isMounted = false; };
-    }, [path]);
+    }, [path, user]);
 
     const effectiveSrc = (path && path.startsWith('http')) ? path : src;
     if (!effectiveSrc) return <div style={{ ...style, background: '#f5f5f5' }} />;
