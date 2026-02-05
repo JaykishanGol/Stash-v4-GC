@@ -117,6 +117,9 @@ export interface DataSlice {
     undo: () => void;
     redo: () => void;
     updateUndoState: () => void;
+
+    // Data Reset (for sign out)
+    clearAllUserData: () => void;
 }
 
 export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
@@ -1081,6 +1084,30 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             undoDescription: undoStack.getUndoDescription(),
             redoDescription: undoStack.getRedoDescription(),
         });
+    },
+
+    // Data Reset (for sign out) - clears all user data from memory
+    clearAllUserData: () => {
+        console.log('[Store] Clearing all user data...');
+        set({
+            items: [],
+            trashedItems: [],
+            folders: [],
+            lists: [],
+            tasks: [],
+            uploads: [],
+            smartFolderCounts: { notes: 0, links: 0, files: 0, images: 0, folders: 0 },
+            todayStats: { dueToday: 0, reminders: 0, totalReminders: 0, overdue: 0, tasks: 0 },
+            hasMoreItems: false,
+            itemsLoadedCount: 0,
+            canUndo: false,
+            canRedo: false,
+            undoDescription: null,
+            redoDescription: null,
+        });
+        // Clear undo stack to prevent data leaks
+        undoStack.clear();
+        console.log('[Store] All user data cleared');
     },
 
     undo: () => {
