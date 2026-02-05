@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Mail, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { useAppStore } from '../../store/useAppStore';
 
 interface AuthModalProps {
     isOpen: boolean;
@@ -17,6 +18,13 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     const [password, setPassword] = useState('');
     const [status, setStatus] = useState<AuthStatus>('idle');
     const [message, setMessage] = useState('');
+
+    // Close sidebar on mobile when modal opens
+    useEffect(() => {
+        if (isOpen && window.innerWidth < 768) {
+            useAppStore.setState({ isSidebarOpen: false });
+        }
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -101,8 +109,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     };
 
     return (
-        <div className="modal-overlay active" onClick={onClose}>
-            <div className="modal" style={{ width: 'min(420px, 90vw)', maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay active" onClick={onClose} style={{ zIndex: 9999 }}>
+            <div className="modal" style={{ width: 'min(420px, 90vw)', maxWidth: 420, zIndex: 9999, position: 'relative' }} onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="modal-header">
                     <div>

@@ -109,8 +109,33 @@ export async function clearGoogleConnection(): Promise<void> {
 
 /**
  * Check if user has a stored refresh token (persistent Google connection)
+ * Falls back to checking is_google_connected for session-based auth
  */
 export async function hasStoredGoogleConnection(): Promise<boolean> {
-    const token = await getStoredRefreshToken();
-    return token !== null;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+        console.log('[GoogleTokenService] hasStoredGoogleConnection: No user');
+        return false;
+    }
+
+    const { data, error } = await supabase
+        .from('user_settings')
+        .select('google_refresh_token, is_google_connected')
+        .eq('user_id', user.id)
+        .single();
+
+    if (error) {
+        console.log('[GoogleTokenService] hasStoredGoogleConnection: DB error', error.message);
+        return false;
+    }
+
+    const hasToken = !!data?.google_refresh_token;
+    const isConnected = data?.is_google_connected === true;
+
+    console.log('[GoogleTokenService] hasStoredGoogleConnection:', { hasToken, isConnected });
+
+    // ONLY return true if we have an actual refresh token stored in the database
+    // The is_google_connected flag alone is not sufficient - it may have been
+    // set before OAuth completed, or the token could have been revoked
+    return hasToken;
 }

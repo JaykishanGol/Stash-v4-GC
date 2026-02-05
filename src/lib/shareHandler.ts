@@ -21,8 +21,21 @@ export interface ShareData {
 function openShareDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(SHARE_DB_NAME, DB_VERSION);
+
+        // CRITICAL: Create object store if it doesn't exist
+        request.onupgradeneeded = (event) => {
+            const db = (event.target as IDBOpenDBRequest).result;
+            if (!db.objectStoreNames.contains(SHARE_STORE_NAME)) {
+                db.createObjectStore(SHARE_STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                console.log('[ShareHandler] Created share object store');
+            }
+        };
+
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onerror = () => {
+            console.error('[ShareHandler] Failed to open share DB:', request.error);
+            reject(request.error);
+        };
     });
 }
 

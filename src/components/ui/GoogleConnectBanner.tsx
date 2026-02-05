@@ -30,14 +30,10 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
     };
 
     const handleConnect = async () => {
-        // Mark intent in DB before redirecting
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            await supabase.from('user_settings').upsert({
-                user_id: user.id,
-                is_google_connected: true
-            });
-        }
+        // NOTE: We do NOT set is_google_connected here anymore.
+        // The flag is only set after OAuth completes successfully and
+        // the refresh token is stored in storeGoogleRefreshToken().
+        // This prevents false positives when OAuth is cancelled.
 
         await supabase.auth.signInWithOAuth({
             provider: 'google',

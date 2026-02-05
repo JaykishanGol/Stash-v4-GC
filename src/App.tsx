@@ -11,7 +11,6 @@ import { ToastProvider } from './components/ui/ToastProvider';
 import { ToastListener } from './components/ui/ToastListener';
 import { BulkActionsBar } from './components/ui/BulkActionsBar';
 import { AppErrorBoundary } from './components/ui/AppErrorBoundary';
-import { MobileNav } from './components/layout/MobileNav';
 import { NotificationCenter } from './components/ui/NotificationCenter';
 import { ShareIntentModal } from './components/modals/ShareIntentModal';
 import { DragDropOverlay } from './components/capture/CaptureEngine';
@@ -51,6 +50,21 @@ function App() {
   useEffect(() => {
     persistentSyncQueue.process();
   }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle('auth-modal-open', isAuthModalOpen);
+    document.documentElement.classList.toggle('auth-modal-open', isAuthModalOpen);
+    return () => {
+      document.body.classList.remove('auth-modal-open');
+      document.documentElement.classList.remove('auth-modal-open');
+    };
+  }, [isAuthModalOpen]);
+
+  useEffect(() => {
+    if (isAuthModalOpen && window.innerWidth < 768) {
+      useAppStore.setState({ isSidebarOpen: false });
+    }
+  }, [isAuthModalOpen]);
 
   // Fetch persistent notifications on load
   useEffect(() => {
@@ -135,7 +149,6 @@ function App() {
           <ShareIntentModal />
           <BulkActionsBar />
           <DragDropOverlay />
-          <MobileNav />
 
           {/* Mobile Fixed Notification Bell - Forced Positioning */}
           <div

@@ -435,7 +435,7 @@ export function QuickAddModal() {
                         {/* Link Type Content */}
                         {
                             quickAddType === 'link' && (
-                                <div className="input-wrapper">
+                                <div className="input-wrapper" style={{ marginBottom: 12 }}>
                                     <input
                                         type="url"
                                         className="quick-add-input"
@@ -493,6 +493,7 @@ export function QuickAddModal() {
                             (quickAddType === 'file' || quickAddType === 'image') && (
                                 <div
                                     className="upload-zone"
+                                    style={{ marginBottom: 12 }}
                                     onClick={() => fileInputRef.current?.click()}
                                 >
                                     <input
@@ -572,22 +573,12 @@ export function QuickAddModal() {
                             )
                         }
 
-                        {/* Folder Type Content */}
+                        {/* Folder Type Content - Simplified for mobile */}
                         {
                             quickAddType === 'folder' && (
-                                <div className="input-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                                    <div>
-                                        <label style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Create New Folder</label>
-                                        <textarea
-                                            className="quick-add-input"
-                                            placeholder="Folder description (optional)..."
-                                            value={folderDescription}
-                                            onChange={(e) => setFolderDescription(e.target.value)}
-                                            style={{ minHeight: 80 }}
-                                        />
-                                    </div>
-
-                                    <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 16, display: 'flex', gap: 12 }}>
+                                <div className="input-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+                                    {/* Upload options */}
+                                    <div style={{ display: 'flex', gap: 12 }}>
                                         {/* Upload Folder Zone */}
                                         <div
                                             className="upload-zone"
@@ -803,71 +794,69 @@ export function QuickAddModal() {
                             </div>
                         </div>
 
-                        {/* Priority & Schedule Row */}
-                        {quickAddType !== 'folder' && (
-                            <div className="mobile-options-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, paddingTop: 4 }}>
-                                <div className="priority-section" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                    <span className="priority-label" style={{ marginRight: 0 }}>Priority</span>
-                                    <div className="priority-options" style={{ display: 'flex', gap: 8 }}>
-                                        {(['high', 'medium', 'low', 'none'] as const).map((p) => (
-                                            <button
-                                                key={p}
-                                                className={`priority-circle ${priority === p ? 'active' : ''}`}
-                                                onClick={() => setPriority(p)}
-                                                title={p.charAt(0).toUpperCase() + p.slice(1)}
-                                                style={{
-                                                    width: 28,
-                                                    height: 28,
-                                                    borderRadius: '50%',
-                                                    backgroundColor: PRIORITY_COLORS[p],
-                                                    border: '2px solid transparent',
-                                                    cursor: 'pointer',
-                                                    boxShadow: priority === p ? `0 0 0 2px white, 0 0 0 4px ${PRIORITY_COLORS[p]}` : 'none',
-                                                    transition: 'all 0.15s ease',
-                                                    opacity: priority === p ? 1 : 0.3
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Vertical Divider */}
-                                <div style={{ width: 1, height: 24, background: 'var(--border-light)', margin: '0 8px' }} />
-
-                                {/* Schedule Button (Pill) */}
-                                <div className="quick-options">
-                                    <button
-                                        className="quick-option-btn"
-                                        onClick={() => {
-                                            if (editingItem) {
-                                                closeQuickAdd();
-                                                openScheduler(editingItem.id);
-                                            } else {
-                                                setIsLocalSchedulerOpen(true);
-                                            }
-                                        }}
-                                        title="Schedule"
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            height: 28, /* Match circle size */
-                                            borderRadius: 14,
-                                            background: (dueDate || reminderDate) ? 'var(--accent-light)' : '#F3F4F6',
-                                            color: (dueDate || reminderDate) ? 'var(--accent)' : 'var(--text-secondary)',
-                                            border: '1px solid transparent',
-                                            padding: '0 12px',
-                                            gap: 6,
-                                            fontSize: '0.8rem',
-                                            fontWeight: 500
-                                        }}
-                                    >
-                                        <Calendar size={14} />
-                                        <span>Schedule</span>
-                                    </button>
+                        {/* Priority & Schedule Row - Now shown for ALL types including folder */}
+                        <div className="mobile-options-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, paddingTop: 4 }}>
+                            <div className="priority-section" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <span className="priority-label" style={{ marginRight: 0 }}>Priority</span>
+                                <div className="priority-options" style={{ display: 'flex', gap: 8 }}>
+                                    {(['high', 'medium', 'low', 'none'] as const).map((p) => (
+                                        <button
+                                            key={p}
+                                            className={`priority-circle ${priority === p ? 'active' : ''}`}
+                                            onClick={() => setPriority(p)}
+                                            title={p.charAt(0).toUpperCase() + p.slice(1)}
+                                            style={{
+                                                width: 28,
+                                                height: 28,
+                                                borderRadius: '50%',
+                                                backgroundColor: PRIORITY_COLORS[p],
+                                                border: '2px solid transparent',
+                                                cursor: 'pointer',
+                                                boxShadow: priority === p ? `0 0 0 2px white, 0 0 0 4px ${PRIORITY_COLORS[p]}` : 'none',
+                                                transition: 'all 0.15s ease',
+                                                opacity: priority === p ? 1 : 0.3
+                                            }}
+                                        />
+                                    ))}
                                 </div>
                             </div>
-                        )}
+
+                            {/* Vertical Divider */}
+                            <div style={{ width: 1, height: 24, background: 'var(--border-light)', margin: '0 8px' }} />
+
+                            {/* Schedule Button (Pill) */}
+                            <div className="quick-options">
+                                <button
+                                    className="quick-option-btn"
+                                    onClick={() => {
+                                        if (editingItem) {
+                                            closeQuickAdd();
+                                            openScheduler(editingItem.id);
+                                        } else {
+                                            setIsLocalSchedulerOpen(true);
+                                        }
+                                    }}
+                                    title="Schedule"
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        height: 28, /* Match circle size */
+                                        borderRadius: 14,
+                                        background: (dueDate || reminderDate) ? 'var(--accent-light)' : '#F3F4F6',
+                                        color: (dueDate || reminderDate) ? 'var(--accent)' : 'var(--text-secondary)',
+                                        border: '1px solid transparent',
+                                        padding: '0 12px',
+                                        gap: 6,
+                                        fontSize: '0.8rem',
+                                        fontWeight: 500
+                                    }}
+                                >
+                                    <Calendar size={14} />
+                                    <span>Schedule</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Footer */}

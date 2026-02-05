@@ -28,13 +28,15 @@ export function useGoogleCalendar(viewDate: Date) {
     const fetchGoogleData = useCallback(async () => {
         setIsLoading(true);
         setError(null);
+        console.log('[useGoogleCalendar] Starting fetch for viewDate:', viewDate);
 
         try {
             // Check if user has Google connected (stored refresh token in DB)
             const hasConnection = await hasStoredGoogleConnection();
+            console.log('[useGoogleCalendar] hasConnection:', hasConnection);
 
             if (!hasConnection) {
-                console.log('[useGoogleCalendar] No Google connection found');
+                console.log('[useGoogleCalendar] No Google connection found - skipping fetch');
                 setGoogleEvents([]);
                 setGoogleTasks([]);
                 return;
@@ -43,18 +45,21 @@ export function useGoogleCalendar(viewDate: Date) {
             // Calculate range for current view (Month view buffer)
             const monthStart = startOfMonth(viewDate);
             const start = startOfWeek(monthStart).toISOString();
+            console.log('[useGoogleCalendar] Fetching events from:', start);
 
             // Fetch Events (Ghost Events)
             const { items: events } = await GoogleClient.listEvents('primary', {
                 timeMin: start,
                 maxResults: 250
             });
+            console.log('[useGoogleCalendar] Fetched', events.length, 'Google events');
             setGoogleEvents(events);
 
             // Fetch Tasks (Ghost Tasks)
             // Note: Google Tasks API doesn't support date filtering easily, so we fetch default list
-            const tasks = await GoogleClient.listAllTasks('@default');
-            setGoogleTasks(tasks);
+            const fetchedTasks = await GoogleClient.listAllTasks('@default');
+            console.log('[useGoogleCalendar] Fetched', fetchedTasks.length, 'Google tasks');
+            setGoogleTasks(fetchedTasks);
 
         } catch (err: any) {
             console.error('[useGoogleCalendar] Fetch failed:', err);

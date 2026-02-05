@@ -666,6 +666,116 @@ export function TasksView() {
                 .items-grid-home.list {
                     grid-template-columns: 1fr;
                 }
+
+                /* Mobile Responsive Styles */
+                @media (max-width: 768px) {
+                    .tasks-view-simple {
+                        padding: 12px;
+                    }
+
+                    .tasks-row {
+                        padding: 12px;
+                        margin-bottom: 12px;
+                    }
+
+                    .tasks-row-header h3 {
+                        font-size: 0.75rem;
+                    }
+
+                    .add-task-btn {
+                        padding: 5px 10px;
+                        font-size: 0.75rem;
+                    }
+
+                    .task-create-inline {
+                        flex-direction: column;
+                        align-items: stretch;
+                        gap: 8px;
+                    }
+
+                    .task-create-inline input {
+                        min-width: unset;
+                        width: 100%;
+                    }
+
+                    .color-picker {
+                        justify-content: center;
+                    }
+
+                    .task-create-inline .save-btn,
+                    .task-create-inline .cancel-btn {
+                        flex: 1;
+                    }
+
+                    /* Task boxes - full width grid layout */
+                    .tasks-boxes {
+                        display: grid;
+                        grid-template-columns: repeat(2, 1fr);
+                        gap: 10px;
+                    }
+
+                    .task-box-simple {
+                        min-width: unset;
+                        max-width: unset;
+                        padding: 10px 12px;
+                    }
+
+                    .task-box-name {
+                        font-size: 0.8rem;
+                    }
+
+                    .task-box-count {
+                        font-size: 0.7rem;
+                    }
+
+                    /* Quick Access - full width grid */
+                    .quick-access-compact {
+                        margin-bottom: 12px;
+                    }
+
+                    .compact-section-title {
+                        font-size: 0.75rem;
+                        margin-bottom: 8px;
+                    }
+
+                    .quick-access-grid {
+                        display: grid;
+                        grid-template-columns: repeat(3, 1fr);
+                        gap: 8px;
+                    }
+
+                    .qa-card {
+                        min-width: unset;
+                        padding: 10px 8px;
+                    }
+
+                    .qa-icon svg {
+                        width: 18px;
+                        height: 18px;
+                    }
+
+                    .qa-count {
+                        font-size: 1rem;
+                    }
+
+                    .qa-label {
+                        font-size: 0.6rem;
+                    }
+
+                    /* Items section */
+                    .items-section-home {
+                        margin-top: 12px;
+                    }
+
+                    .items-header h3 {
+                        font-size: 0.75rem;
+                    }
+
+                    .items-grid-home {
+                        grid-template-columns: 1fr;
+                        gap: 12px;
+                    }
+                }
             `}</style>
         </div>
     );

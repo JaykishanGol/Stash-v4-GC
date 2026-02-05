@@ -195,6 +195,31 @@ textarea:focus {
     flex-shrink: 0;
 }
 
+.sidebar.force-hidden {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.auth-modal-open .sidebar,
+.auth-modal-open .sidebar.open,
+html.auth-modal-open .sidebar,
+body.auth-modal-open .sidebar,
+html.auth-modal-open .sidebar.open,
+body.auth-modal-open .sidebar.open {
+    display: none !important;
+    transform: translate3d(-100%, 0, 0) !important;
+    z-index: -1 !important;
+    pointer-events: none !important;
+}
+
+.auth-modal-open .sidebar-overlay,
+html.auth-modal-open .sidebar-overlay,
+body.auth-modal-open .sidebar-overlay {
+    display: none !important;
+    z-index: -1 !important;
+}
+
 .sidebar-header {
     display: flex;
     align-items: center;
@@ -932,6 +957,11 @@ textarea:focus {
     margin-top: 24px;
 }
 
+.today-layout.agenda-mode {
+    grid-template-columns: 1fr;
+    gap: 18px;
+}
+
 .today-main {
     min-width: 0;
 }
@@ -1339,7 +1369,7 @@ textarea:focus {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 10000;
     opacity: 0;
     visibility: hidden;
     transition: all var(--transition-normal);
@@ -1356,6 +1386,8 @@ textarea:focus {
     background: #FFFFFF;
     border-radius: 20px;
     border: 1px solid var(--border-light);
+    position: relative;
+    z-index: 10001;
     box-shadow:
         0 24px 48px rgba(0, 0, 0, 0.12),
         0 12px 24px rgba(0, 0, 0, 0.08),
@@ -1508,7 +1540,7 @@ textarea:focus {
         top: 0;
         height: 100dvh;
         /* Use dynamic viewport height */
-        z-index: 2000;
+        z-index: 1200;
         /* Above MobileNav (1000) */
         transform: translate3d(-100%, 0, 0);
         transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
@@ -1523,6 +1555,34 @@ textarea:focus {
 
     .sidebar.open {
         transform: translate3d(0, 0, 0) !important;
+    }
+
+    .sidebar.force-hidden {
+        display: none !important;
+        transform: translate3d(-100%, 0, 0) !important;
+    }
+
+    .auth-modal-open .sidebar,
+    .auth-modal-open .sidebar.open {
+        transform: translate3d(-100%, 0, 0) !important;
+        display: none !important;
+    }
+
+    .auth-modal-open .sidebar-overlay {
+        display: none !important;
+    }
+
+    html.auth-modal-open .sidebar,
+    html.auth-modal-open .sidebar.open,
+    body.auth-modal-open .sidebar,
+    body.auth-modal-open .sidebar.open {
+        display: none !important;
+        transform: translate3d(-100%, 0, 0) !important;
+    }
+
+    html.auth-modal-open .sidebar-overlay,
+    body.auth-modal-open .sidebar-overlay {
+        display: none !important;
     }
 
     .sidebar-content {
@@ -4275,6 +4335,9 @@ button[style*="background: var(--accent)"]:hover::after {
     .sidebar {
         background: #FFFFFF !important;
         box-shadow: 2px 0 16px rgba(0, 0, 0, 0.15) !important;
+        /* Ensure it's fixed on mobile but below modal (9999) */
+        position: fixed !important;
+        z-index: 900 !important;
     }
 
     .sidebar-overlay {
@@ -4503,35 +4566,46 @@ button[style*="background: var(--accent)"]:hover::after {
         justify-content: space-between;
     }
 
-    /* Sticky Footer with Save Button */
+    /* Sticky Footer with Save Button - Fixed positioning for reliable taps */
     .content-footer {
         display: flex !important;
         /* Show footer on mobile */
-        position: sticky;
-        /* Sticky relative to parent flex container */
-        bottom: 0;
-        left: 0;
-        right: 0;
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
         padding: 16px !important;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom)) !important;
         background: #fff !important;
-        border-top: none !important;
-        /* Clean look */
-        z-index: 20;
+        border-top: 1px solid var(--border-light) !important;
+        z-index: 100 !important;
         box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
-        margin-top: auto;
-        /* Push to bottom */
     }
 
     .btn-add {
         width: 100%;
         justify-content: center;
-        padding: 14px !important;
+        padding: 16px !important;
         font-size: 1.1rem !important;
         border-radius: 12px !important;
         background: var(--text-primary) !important;
         /* Premium black button */
         color: white !important;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+        cursor: pointer !important;
+        touch-action: manipulation !important;
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1) !important;
+        user-select: none !important;
+    }
+
+    .btn-add:active {
+        transform: scale(0.98) !important;
+        opacity: 0.9 !important;
+    }
+
+    /* Add bottom padding to content to avoid footer overlap */
+    .modal-content-area {
+        padding-bottom: 90px !important;
     }
 
     .modal-hint {

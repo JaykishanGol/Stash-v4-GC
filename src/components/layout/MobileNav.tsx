@@ -11,11 +11,12 @@ export function MobileNav() {
         toggleSidebar,
         isSidebarOpen,
         isHeaderVisible,
-        isQuickAddOpen
+        isQuickAddOpen,
+        isAuthModalOpen
     } = useAppStore();
 
-    // Hide if header is hidden (scroll) OR Quick Add modal is open OR Sidebar is open
-    const isHidden = !isHeaderVisible || isQuickAddOpen || isSidebarOpen;
+    // Hide if header is hidden (scroll) OR Quick Add modal is open OR Sidebar is open OR Auth modal is open
+    const isHidden = !isHeaderVisible || isQuickAddOpen || isSidebarOpen || isAuthModalOpen;
 
     return (
         <nav className={`mobile-nav ${isHidden ? 'nav-hidden' : ''}`}>
@@ -54,7 +55,7 @@ export function MobileNav() {
 
             <button
                 className={`nav-tab ${isSidebarOpen ? 'active' : ''}`}
-                onClick={toggleSidebar}
+                onClick={() => !isAuthModalOpen && toggleSidebar()}
             >
                 <Menu size={22} />
                 <span>Menu</span>

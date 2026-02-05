@@ -187,8 +187,19 @@ function TagsDisplay({ tags }: { tags: string[] }) {
     );
 }
 
+// Global URL cache to prevent blinking during scroll/re-render
+// Cache expires after 50 minutes (signed URLs valid for 60 min)
+const signedUrlCache = new Map<string, { url: string; expiry: number }>();
+
 function SecureImage({ path, alt, style }: { path: string; alt: string; style?: React.CSSProperties }) {
-    const [src, setSrc] = useState<string | null>(null);
+    const [src, setSrc] = useState<string | null>(() => {
+        // Check cache on initial render
+        if (!path) return null;
+        if (path.startsWith('http') || path.startsWith('blob:')) return path;
+        const cached = signedUrlCache.get(path);
+        if (cached && cached.expiry > Date.now()) return cached.url;
+        return null;
+    });
 
     useEffect(() => {
         if (!path) return;
@@ -197,17 +208,29 @@ function SecureImage({ path, alt, style }: { path: string; alt: string; style?: 
             return;
         }
 
+        // Check cache first
+        const cached = signedUrlCache.get(path);
+        if (cached && cached.expiry > Date.now()) {
+            setSrc(cached.url);
+            return;
+        }
+
         let isMounted = true;
         supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600, {
             transform: { width: 300, height: 300, resize: 'cover' }
         }).then(({ data }) => {
             if (isMounted && data?.signedUrl) {
+                // Cache for 50 minutes
+                signedUrlCache.set(path, { url: data.signedUrl, expiry: Date.now() + 50 * 60 * 1000 });
                 setSrc(data.signedUrl);
             } else {
                 const { data: publicData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path, {
                     transform: { width: 300, height: 300, resize: 'cover' }
                 });
-                if (isMounted) setSrc(publicData.publicUrl);
+                if (isMounted) {
+                    signedUrlCache.set(path, { url: publicData.publicUrl, expiry: Date.now() + 50 * 60 * 1000 });
+                    setSrc(publicData.publicUrl);
+                }
             }
         });
 
@@ -216,7 +239,7 @@ function SecureImage({ path, alt, style }: { path: string; alt: string; style?: 
 
     const effectiveSrc = (path && path.startsWith('http')) ? path : src;
     if (!effectiveSrc) return <div style={{ ...style, background: '#f5f5f5' }} />;
-    return <img src={effectiveSrc} alt={alt} style={style} />;
+    return <img src={effectiveSrc} alt={alt} style={style} loading="lazy" decoding="async" />;
 }
 
 // Checkbox Component for Batch Selection

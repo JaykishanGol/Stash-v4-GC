@@ -716,7 +716,10 @@ export const createDataSlice: StateCreator<DataSlice> = (set, get) => ({
             updated_at: now,
             deleted_at: null,
             list_id: taskData.list_id || null,
-            ...taskData
+            // CRITICAL: Initialize arrays to prevent drag-drop failures
+            ...taskData,
+            item_ids: taskData.item_ids || [],
+            item_completion: taskData.item_completion || {}
         };
         set(state => ({ tasks: [newTask, ...state.tasks] }));
         get().syncTaskToDb(newTask);

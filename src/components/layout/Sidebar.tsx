@@ -395,6 +395,7 @@ export function Sidebar() {
     const [, setLocation] = useLocation();
     const {
         isSidebarOpen,
+        isAuthModalOpen,
         toggleSidebar,
         activeView,
         smartFolderCounts,
@@ -428,6 +429,11 @@ export function Sidebar() {
 
     const [isNewListModalOpen, setIsNewListModalOpen] = useState(false);
     const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
+
+    // Belt-and-suspenders: never render sidebar when auth modal is open
+    if (isAuthModalOpen) {
+        return null;
+    }
 
     const handleCreateFolder = (name: string) => {
         addFolder({

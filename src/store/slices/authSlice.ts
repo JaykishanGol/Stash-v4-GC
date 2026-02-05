@@ -19,7 +19,7 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set) => ({
   isLoading: false,
 
   setUser: (user) => set({ user }),
-  openAuthModal: () => set({ isAuthModalOpen: true }),
+  openAuthModal: () => set({ isAuthModalOpen: true, isSidebarOpen: false } as any),
   closeAuthModal: () => set({ isAuthModalOpen: false }),
   setLoading: (loading) => set({ isLoading: loading }),
   signOut: async () => {
