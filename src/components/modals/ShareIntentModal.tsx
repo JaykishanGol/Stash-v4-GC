@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Check, Folder, Palette, AlertCircle, List as ListIcon, Calendar, Image as ImageIcon, FileText } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { supabase } from '../../lib/supabase'; // Import supabase
+import { supabase, STORAGE_BUCKET } from '../../lib/supabase'; // Import bucket constant
 import type { Item, PriorityLevel, CardColor } from '../../lib/types';
 import { CARD_COLORS } from '../../lib/types';
 import { SchedulerContent } from './SchedulerModal';
@@ -12,7 +12,8 @@ export function ShareIntentModal() {
         setPendingShareItems,
         addItem,
         folders,
-        lists
+        lists,
+        addNotification
     } = useAppStore();
 
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -42,6 +43,8 @@ export function ShareIntentModal() {
 
     const handleSave = async (withTriage: boolean) => {
         setIsSaving(true);
+        let successCount = 0;
+        let failCount = 0;
 
         for (const item of pendingShareItems) {
             const finalItem: Item = {
@@ -61,12 +64,19 @@ export function ShareIntentModal() {
 
             // --- SUPABASE STORAGE UPLOAD ---
             if ((finalItem.type === 'file' || finalItem.type === 'image') && finalItem.file_meta?.path.startsWith('blob:')) {
+                // Check if user is demo - can't upload without auth
+                if (finalItem.user_id === 'demo') {
+                    addNotification('warning', 'Sign In Required', 'Files cannot be saved without an account. Please sign in first.');
+                    failCount++;
+                    continue; // Skip this item
+                }
+
                 try {
                     // 1. Fetch the blob from the local URL
                     const response = await fetch(finalItem.file_meta.path);
                     const blob = await response.blob();
 
-                    // 2. Upload to 'stash_uploads' bucket
+                    // 2. Upload to storage bucket
                     const userId = finalItem.user_id;
                     const timestamp = Date.now();
                     // Add random string to avoid collision in batch
@@ -74,9 +84,9 @@ export function ShareIntentModal() {
                     const sanitizedName = finalItem.file_meta.originalName?.replace(/[^a-zA-Z0-9.-]/g, '_') || 'file';
                     const filePath = `${userId}/${timestamp}_${random}_${sanitizedName}`;
 
-                    const { data: _data, error } = await supabase
+                    const { error } = await supabase
                         .storage
-                        .from('stash_uploads')
+                        .from(STORAGE_BUCKET)
                         .upload(filePath, blob, {
                             cacheControl: '3600',
                             upsert: false
@@ -87,7 +97,7 @@ export function ShareIntentModal() {
                     // 3. Get Public URL
                     const { data: urlData } = supabase
                         .storage
-                        .from('stash_uploads')
+                        .from(STORAGE_BUCKET)
                         .getPublicUrl(filePath);
 
                     // 4. Update item with remote URL
@@ -95,23 +105,42 @@ export function ShareIntentModal() {
                         finalItem.file_meta.path = urlData.publicUrl;
                     }
 
-                    // (Optional) Revoke the local blob URL
+                    // Revoke the local blob URL
                     URL.revokeObjectURL(item.file_meta!.path);
+
+                    // Add item after successful upload
+                    addItem(finalItem);
+                    successCount++;
+
+                    if (withTriage && selectedListId) {
+                        const { addItemsToList } = useAppStore.getState();
+                        addItemsToList(selectedListId, [finalItem.id]);
+                    }
 
                 } catch (e) {
                     console.error("Failed to upload file:", e);
-                    // Continue to save item with blob URL (will be broken next reload but better than data loss?)
-                    // Or maybe we should skip adding it?
-                    // Let's add it so user can retry or see it failed.
+                    addNotification('error', 'Upload Failed', `Could not upload ${finalItem.title}: ${(e as Error).message}`);
+                    failCount++;
+                    // Don't add item with broken blob URL
+                    continue;
+                }
+            } else {
+                // Non-file items (notes, links) - just add them
+                addItem(finalItem);
+                successCount++;
+
+                if (withTriage && selectedListId) {
+                    const { addItemsToList } = useAppStore.getState();
+                    addItemsToList(selectedListId, [finalItem.id]);
                 }
             }
+        }
 
-            addItem(finalItem);
-
-            if (withTriage && selectedListId) {
-                const { addItemsToList } = useAppStore.getState();
-                addItemsToList(selectedListId, [finalItem.id]);
-            }
+        // Show summary notification
+        if (successCount > 0 && failCount === 0) {
+            addNotification('success', 'Saved', `${successCount} item(s) saved successfully`);
+        } else if (successCount > 0 && failCount > 0) {
+            addNotification('warning', 'Partial Save', `${successCount} saved, ${failCount} failed`);
         }
 
         setPendingShareItems([]);

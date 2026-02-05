@@ -70,11 +70,17 @@ export function useAuth() {
 
         initializeAuth();
 
-        // Listen for auth changes
-        const { data: { subscription } } = onAuthStateChange(async (updatedUser) => {
+        // Listen for auth changes (including OAuth callbacks)
+        const { data: { subscription } } = onAuthStateChange(async (updatedUser, session, event) => {
             if (!isMounted) return;
 
             const newUserId = updatedUser?.id || null;
+
+            // Capture Google refresh token on OAuth SIGNED_IN event
+            if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
+                console.log('[Auth] OAuth SIGNED_IN: Storing Google refresh token...');
+                storeGoogleRefreshToken(session.provider_refresh_token);
+            }
 
             // LOGIC FIX: Only trigger actions if the user IDENTITY actually changed.
             // Ignore "TOKEN_REFRESHED" events where the user ID stays the same.

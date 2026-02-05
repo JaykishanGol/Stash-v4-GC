@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { startOfMonth, startOfWeek, isSameDay } from 'date-fns';
 import { useAppStore } from '../store/useAppStore';
 import { GoogleClient, type GoogleEvent, type GoogleTask } from '../lib/googleClient';
-import { supabase } from '../lib/supabase';
+import { hasStoredGoogleConnection } from '../lib/googleTokenService';
 import type { Item, Task } from '../lib/types';
 
 export interface CalendarEntry {
@@ -30,9 +30,11 @@ export function useGoogleCalendar(viewDate: Date) {
         setError(null);
 
         try {
-            const { data: { session } } = await supabase.auth.getSession();
+            // Check if user has Google connected (stored refresh token in DB)
+            const hasConnection = await hasStoredGoogleConnection();
 
-            if (!session?.provider_token) {
+            if (!hasConnection) {
+                console.log('[useGoogleCalendar] No Google connection found');
                 setGoogleEvents([]);
                 setGoogleTasks([]);
                 return;

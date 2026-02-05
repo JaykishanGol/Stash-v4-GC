@@ -212,15 +212,23 @@ export async function getSession() {
     return supabase.auth.getSession();
 }
 
-export function onAuthStateChange(callback: (user: { id: string; email: string } | null) => void) {
-    return supabase.auth.onAuthStateChange((_event, session) => {
+// Enhanced callback type that includes provider tokens and event
+export type AuthChangeCallback = (
+    user: { id: string; email: string } | null,
+    session?: { provider_refresh_token?: string | null; provider_token?: string | null } | null,
+    event?: string
+) => void;
+
+export function onAuthStateChange(callback: AuthChangeCallback) {
+    return supabase.auth.onAuthStateChange((event, session) => {
         if (session?.user) {
-            callback({
-                id: session.user.id,
-                email: session.user.email || '',
-            });
+            callback(
+                { id: session.user.id, email: session.user.email || '' },
+                { provider_refresh_token: session.provider_refresh_token, provider_token: session.provider_token },
+                event
+            );
         } else {
-            callback(null);
+            callback(null, null, event);
         }
     });
 }

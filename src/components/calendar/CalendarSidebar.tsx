@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isSameDay, isToday, addMonths, subMonths } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus, ChevronDown } from 'lucide-react';
 import { GoogleClient, type GoogleCalendarListEntry } from '../../lib/googleClient';
-import { supabase } from '../../lib/supabase';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 
 interface CalendarSidebarProps {
     selectedDate: Date | null;
@@ -14,20 +14,20 @@ export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect }: Ca
     const [miniCalDate, setMiniCalDate] = useState(new Date());
     const [calendars, setCalendars] = useState<GoogleCalendarListEntry[]>([]);
     const [enabledCalendars, setEnabledCalendars] = useState<Set<string>>(new Set(['primary']));
-    const [hasGoogleAuth, setHasGoogleAuth] = useState(false);
     const [showCreateMenu, setShowCreateMenu] = useState(false);
+    
+    // Use the new hook that checks DB for stored refresh tokens
+    const { isConnected: hasGoogleAuth, isLoading: googleAuthLoading } = useGoogleAuth();
 
+    // Fetch calendars when Google is connected
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.provider_token) {
-                setHasGoogleAuth(true);
-                GoogleClient.listCalendars().then(cals => {
-                    setCalendars(cals);
-                    setEnabledCalendars(new Set(cals.map(c => c.id)));
-                }).catch(console.error);
-            }
-        });
-    }, []);
+        if (hasGoogleAuth && !googleAuthLoading) {
+            GoogleClient.listCalendars().then(cals => {
+                setCalendars(cals);
+                setEnabledCalendars(new Set(cals.map(c => c.id)));
+            }).catch(console.error);
+        }
+    }, [hasGoogleAuth, googleAuthLoading]);
 
     // Mini calendar days
     const monthStart = startOfMonth(miniCalDate);

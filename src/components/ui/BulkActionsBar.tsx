@@ -1,12 +1,13 @@
 import { useState, useCallback } from 'react';
 import { useAppStore } from '../../store/useAppStore';
-import { FolderInput, Trash2, Calendar, X, Check, Pin, Copy } from 'lucide-react';
+import { FolderInput, Trash2, Calendar, X, Check, Pin, Copy, CheckSquare2 } from 'lucide-react';
 
 export function BulkActionsBar() {
     const {
         selectedItemIds,
         items,
         clearSelection,
+        selectAll,
         moveItemsToTrash,
         openScheduler,
         copyItems,
@@ -68,7 +69,7 @@ export function BulkActionsBar() {
     // Batch move (via cut)
     const handleMove = useCallback(() => {
         if (selectedItemIds.length === 0) return;
-        
+
         // Use cut as the "start move" action
         useAppStore.getState().cutItems(selectedItemIds);
         addNotification('info', 'Ready to Move', 'Navigate to destination folder and Paste (Ctrl+V) or use context menu');
@@ -98,6 +99,15 @@ export function BulkActionsBar() {
         clearSelection();
     }, [clearSelection]);
 
+    // Select all visible items
+    const handleSelectAll = useCallback(() => {
+        const visibleItemIds = items
+            .filter(item => !item.deleted_at && !item.is_archived)
+            .map(item => item.id);
+        selectAll(visibleItemIds);
+        addNotification('info', 'Selected All', `${visibleItemIds.length} items selected`);
+    }, [items, selectAll, addNotification]);
+
     if (!isVisible) return null;
 
     return (
@@ -108,6 +118,11 @@ export function BulkActionsBar() {
                 </div>
                 <span>{count} items selected</span>
             </div>
+
+            <button className="bulk-action-btn" onClick={handleSelectAll} title="Select all items">
+                <CheckSquare2 size={16} />
+                <span>All</span>
+            </button>
 
             <button
                 className="bulk-action-btn"

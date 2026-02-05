@@ -1506,8 +1506,10 @@ textarea:focus {
         position: fixed;
         left: 0 !important;
         top: 0;
-        height: 100dvh; /* Use dynamic viewport height */
-        z-index: 2000; /* Above MobileNav (1000) */
+        height: 100dvh;
+        /* Use dynamic viewport height */
+        z-index: 2000;
+        /* Above MobileNav (1000) */
         transform: translate3d(-100%, 0, 0);
         transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
         will-change: transform;
@@ -2272,10 +2274,13 @@ input.title-input::placeholder {
 }
 
 @keyframes pulse-sync {
-    0%, 100% {
+
+    0%,
+    100% {
         opacity: 0.7;
         transform: scale(1);
     }
+
     50% {
         opacity: 1;
         transform: scale(1.1);
@@ -3721,6 +3726,48 @@ button[style*="background: var(--accent)"]:hover::after {
 
 .bulk-actions-close:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+
+/* Mobile Bulk Actions Bar */
+@media (max-width: 768px) {
+    .bulk-actions-bar {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        transform: translateY(100px);
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+        gap: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .bulk-actions-bar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .bulk-actions-bar.visible {
+        transform: translateY(0);
+    }
+
+    .bulk-actions-count {
+        padding-right: 10px;
+        flex-shrink: 0;
+    }
+
+    .bulk-actions-count span {
+        white-space: nowrap;
+    }
+
+    .bulk-action-btn {
+        padding: 10px 12px;
+        flex-shrink: 0;
+    }
+
+    .bulk-action-btn span {
+        display: none;
+        /* Hide text, show only icons on small screens */
+    }
 }
 
 /* === EMPTY STATE STYLING === */

@@ -15,7 +15,13 @@ export function useKeyboardShortcuts() {
         undo,
         redo,
         canUndo,
-        canRedo
+        canRedo,
+        // Clipboard operations
+        copyItems,
+        cutItems,
+        pasteItems,
+        addNotification,
+        selectedFolderId
     } = useAppStore();
 
     useEffect(() => {
@@ -29,6 +35,30 @@ export function useKeyboardShortcuts() {
             // Ignore if modals are open (except QuickAdd which has its own close logic, or we handle it here)
             // But we might want Escape to close them.
             if (isSchedulerOpen || isAuthModalOpen) return;
+
+            // Cmd/Ctrl + C for Copy
+            if ((e.metaKey || e.ctrlKey) && e.key === 'c' && selectedItemIds.length > 0) {
+                e.preventDefault();
+                copyItems(selectedItemIds);
+                addNotification('success', 'Copied', `${selectedItemIds.length} item(s) copied to clipboard`);
+                return;
+            }
+
+            // Cmd/Ctrl + X for Cut
+            if ((e.metaKey || e.ctrlKey) && e.key === 'x' && selectedItemIds.length > 0) {
+                e.preventDefault();
+                cutItems(selectedItemIds);
+                addNotification('info', 'Ready to Move', `${selectedItemIds.length} item(s) ready to move. Press Ctrl+V to paste.`);
+                clearSelection();
+                return;
+            }
+
+            // Cmd/Ctrl + V for Paste
+            if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+                e.preventDefault();
+                pasteItems(selectedFolderId);
+                return;
+            }
 
             // Cmd/Ctrl + Z for Undo
             if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
@@ -86,5 +116,5 @@ export function useKeyboardShortcuts() {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [openQuickAdd, isQuickAddOpen, closeQuickAdd, selectAll, clearSelection, selectedItemIds, moveItemsToTrash, isSchedulerOpen, isAuthModalOpen, undo, redo, canUndo, canRedo]);
+    }, [openQuickAdd, isQuickAddOpen, closeQuickAdd, selectAll, clearSelection, selectedItemIds, moveItemsToTrash, isSchedulerOpen, isAuthModalOpen, undo, redo, canUndo, canRedo, copyItems, cutItems, pasteItems, addNotification, selectedFolderId]);
 }

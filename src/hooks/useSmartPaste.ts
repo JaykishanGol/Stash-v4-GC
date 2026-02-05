@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { createDefaultItem } from '../lib/types';
 import { generateId, isValidUrl, isImageFile } from '../lib/utils';
+import { compressImage, isCompressibleImage } from '../lib/imageCompression';
 import type { FileMeta } from '../lib/types';
 
 export function useSmartPaste() {
@@ -27,16 +28,23 @@ export function useSmartPaste() {
             if (clipboardData.files.length > 0) {
                 e.preventDefault();
 
-                Array.from(clipboardData.files).forEach(async (file) => {
-                    const isImage = isImageFile(file.type);
+                Array.from(clipboardData.files).forEach(async (originalFile) => {
+                    const isImage = isImageFile(originalFile.type);
                     const uploadId = generateId();
 
-                    addUpload(uploadId, file.name);
+                    addUpload(uploadId, originalFile.name);
 
                     try {
+                        // Compress image before upload
+                        let fileToUpload = originalFile;
+                        if (isImage && isCompressibleImage(originalFile)) {
+                            updateUploadProgress(uploadId, 5, 'Compressing...');
+                            fileToUpload = await compressImage(originalFile);
+                        }
+
                         const { uploadFile } = await import('../lib/supabase');
                         const { path, error } = await uploadFile(
-                            file,
+                            fileToUpload,
                             user?.id || 'demo',
                             isImage ? 'image' : 'file',
                             (progress) => updateUploadProgress(uploadId, progress, '1 MB/s')
@@ -47,14 +55,14 @@ export function useSmartPaste() {
                         completeUpload(uploadId, true);
 
                         const fileMeta: FileMeta = {
-                            size: file.size,
-                            mime: file.type,
+                            size: fileToUpload.size, // Use compressed size
+                            mime: fileToUpload.type,
                             path: path,
-                            originalName: file.name,
+                            originalName: originalFile.name,
                         };
 
                         const newItem = createDefaultItem(user?.id || 'demo', isImage ? 'image' : 'file', {
-                            title: file.name,
+                            title: originalFile.name,
                             file_meta: fileMeta,
                             bg_color: isImage ? '#FEF3C7' : '#FFFFFF',
                         });

@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { GoogleSyncService } from '../../lib/googleSyncService';
 import { GoogleClient, type GoogleTaskList, type GoogleCalendarListEntry } from '../../lib/googleClient';
 import type { RecurringConfig, Item, Task } from '../../lib/types';
-import { supabase } from '../../lib/supabase';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { CustomRecurrenceModal } from './CustomRecurrenceModal';
 import { GoogleConnectBanner } from '../ui/GoogleConnectBanner';
 
@@ -24,9 +24,11 @@ interface SchedulerContentProps {
 }
 
 export function SchedulerContent({ item, isTaskType, onClose, onSave }: SchedulerContentProps) {
-    const [hasGoogleAuth, setHasGoogleAuth] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [activeTab, setActiveTab] = useState<'event' | 'task'>(isTaskType ? 'task' : 'event');
+
+    // Use the new hook that checks DB for stored refresh tokens
+    const { isConnected: hasGoogleAuth, isLoading: googleAuthLoading } = useGoogleAuth();
 
     // Data
     const [taskLists, setTaskLists] = useState<GoogleTaskList[]>([]);
@@ -68,15 +70,15 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
         { method: 'popup', minutes: 10 }
     ]);
 
+    // Fetch Google data when connected (uses DB-stored refresh token)
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.provider_token) {
-                setHasGoogleAuth(true);
-                GoogleClient.listTaskLists().then(setTaskLists).catch(console.error);
-                GoogleClient.listCalendars().then(setCalendars).catch(console.error);
-            }
-        });
+        if (hasGoogleAuth && !googleAuthLoading) {
+            GoogleClient.listTaskLists().then(setTaskLists).catch(console.error);
+            GoogleClient.listCalendars().then(setCalendars).catch(console.error);
+        }
+    }, [hasGoogleAuth, googleAuthLoading]);
 
+    useEffect(() => {
         if (item) {
             setTitle(item.title || '');
             // Task has description, Item doesn't - safely access

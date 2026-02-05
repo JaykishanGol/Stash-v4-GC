@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { hasStoredGoogleConnection } from '../../lib/googleTokenService';
 
 interface GoogleConnectBannerProps {
     className?: string;
@@ -9,9 +10,12 @@ interface GoogleConnectBannerProps {
 /**
  * Banner component shown when user needs to connect their Google account
  * for Calendar/Tasks sync functionality.
+ * 
+ * Now checks for actual refresh token presence (not just intent flag),
+ * ensuring accurate status across devices.
  */
 export function GoogleConnectBanner({ className = '', compact = false }: GoogleConnectBannerProps) {
-    const [isConnectedInDb, setIsConnectedInDb] = useState(false);
+    const [hasRefreshToken, setHasRefreshToken] = useState(false);
     const [checking, setChecking] = useState(true);
 
     useEffect(() => {
@@ -19,18 +23,9 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
     }, []);
 
     const checkStatus = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            const { data } = await supabase
-                .from('user_settings')
-                .select('is_google_connected')
-                .eq('user_id', user.id)
-                .single();
-
-            if (data?.is_google_connected) {
-                setIsConnectedInDb(true);
-            }
-        }
+        // Check if user actually has a stored refresh token (not just intent)
+        const hasToken = await hasStoredGoogleConnection();
+        setHasRefreshToken(hasToken);
         setChecking(false);
     };
 
@@ -57,14 +52,16 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
         });
     };
 
+    // If already connected with valid token, don't show banner
     if (checking) return null;
+    if (hasRefreshToken) return null;
 
     if (compact) {
         return (
             <button
                 className={`google-connect-compact ${className}`}
                 onClick={handleConnect}
-                title={isConnectedInDb ? "Session expired - Click to reconnect" : "Connect Google Account"}
+                title="Connect Google Account"
             >
                 <svg viewBox="0 0 24 24" width="18" height="18">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -72,13 +69,13 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                 </svg>
-                {isConnectedInDb ? 'Reconnect Google' : 'Connect Google'}
+                Connect Google
             </button>
         );
     }
 
     return (
-        <div className={`google-connect-banner ${className} ${isConnectedInDb ? 'reconnect' : ''}`}>
+        <div className={`google-connect-banner ${className}`}>
             <div className="banner-icon">
                 <svg viewBox="0 0 24 24" width="32" height="32">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -88,15 +85,11 @@ export function GoogleConnectBanner({ className = '', compact = false }: GoogleC
                 </svg>
             </div>
             <div className="banner-content">
-                <strong>{isConnectedInDb ? 'Google Connection Expired' : 'Connect Google Account'}</strong>
-                <p>
-                    {isConnectedInDb
-                        ? 'Your secure session has ended. Please reconnect to sync events.'
-                        : 'Sync your events and tasks with Google Calendar'}
-                </p>
+                <strong>Connect Google Account</strong>
+                <p>Sync your events and tasks with Google Calendar</p>
             </div>
             <button className="banner-btn" onClick={handleConnect}>
-                {isConnectedInDb ? 'Reconnect' : 'Connect'}
+                Connect
             </button>
 
             <style>{`

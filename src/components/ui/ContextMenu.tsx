@@ -107,6 +107,13 @@ export function ContextMenu() {
 
     if (!contextMenu.isOpen) return null;
 
+    // Suppress context menu in multi-select mode (2+ items selected)
+    // Use bulk actions bar instead (industry standard: Apple Files, Google Drive, etc.)
+    if (selectedItemIds.length > 1) {
+        closeContextMenu();
+        return null;
+    }
+
     // Handle List Context Menu
     if (contextMenu.type === 'list') {
         const list = lists.find(l => l.id === contextMenu.itemId);
@@ -858,6 +865,45 @@ export function ContextMenu() {
                     height: 1px;
                     background: #e5e7eb;
                     margin: 4px 0;
+                }
+
+                /* Mobile Bottom Sheet Styles */
+                @media (max-width: 600px) {
+                    .ctx-menu {
+                        position: fixed !important;
+                        left: 0 !important;
+                        right: 0 !important;
+                        bottom: 0 !important;
+                        top: auto !important;
+                        max-width: 100%;
+                        min-width: 100%;
+                        border-radius: 20px 20px 0 0;
+                        padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+                        max-height: 70vh;
+                        overflow-y: auto;
+                        animation: ctxSlideUp 0.25s ease-out;
+                    }
+                    @keyframes ctxSlideUp {
+                        from { transform: translateY(100%); }
+                        to { transform: translateY(0); }
+                    }
+                    .ctx-item {
+                        padding: 14px 16px;
+                        font-size: 1rem;
+                    }
+                    .ctx-color-dot, .ctx-priority-dot {
+                        width: 28px;
+                        height: 28px;
+                    }
+                    .ctx-submenu-wrapper .ctx-submenu {
+                        position: static;
+                        margin: 8px 0;
+                        box-shadow: none;
+                        border: 1px solid #e5e7eb;
+                    }
+                    .ctx-submenu-wrapper:hover .ctx-submenu {
+                        display: block;
+                    }
                 }
             `}</style>
         </div>,

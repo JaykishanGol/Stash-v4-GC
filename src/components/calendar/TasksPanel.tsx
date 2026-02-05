@@ -3,7 +3,7 @@ import { format, isToday, isTomorrow, isPast, isYesterday } from 'date-fns';
 import { Plus, ChevronDown, ChevronRight, Circle, CheckCircle2, Calendar, Cloud } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { GoogleClient, type GoogleTask } from '../../lib/googleClient';
-import { supabase } from '../../lib/supabase';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import type { Task } from '../../lib/types';
 
 interface UnifiedTask {
@@ -20,17 +20,16 @@ export function TasksPanel() {
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [showCompleted, setShowCompleted] = useState(false);
     const [googleTasks, setGoogleTasks] = useState<GoogleTask[]>([]);
-    const [hasGoogleAuth, setHasGoogleAuth] = useState(false);
+    
+    // Use the new hook that checks DB for stored refresh tokens
+    const { isConnected: hasGoogleAuth, isLoading: googleAuthLoading } = useGoogleAuth();
 
-    // Fetch Google Tasks
+    // Fetch Google Tasks when connected
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.provider_token) {
-                setHasGoogleAuth(true);
-                GoogleClient.listAllTasks().then(setGoogleTasks).catch(console.error);
-            }
-        });
-    }, []);
+        if (hasGoogleAuth && !googleAuthLoading) {
+            GoogleClient.listAllTasks().then(setGoogleTasks).catch(console.error);
+        }
+    }, [hasGoogleAuth, googleAuthLoading]);
 
     // Convert to unified format
     const unifiedTasks: UnifiedTask[] = [

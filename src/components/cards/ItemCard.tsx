@@ -7,6 +7,7 @@ import { formatFileSize, extractDomain, sanitizeString } from '../../lib/utils';
 import { useAppStore } from '../../store/useAppStore';
 import { QuickActions } from './QuickActions';
 import { getRelativeTime } from '../../hooks/useKeyboardNavigation';
+import { useLongPress } from '../../hooks/useLongPress';
 
 // Date/Time indicator for due dates and reminders
 function DateTimeIndicator({ item }: { item: Item }) {
@@ -221,7 +222,7 @@ function SecureImage({ path, alt, style }: { path: string; alt: string; style?: 
 // Checkbox Component for Batch Selection
 function SelectionCheckbox({ isSelected, onClick }: { isSelected: boolean, onClick: (e: React.MouseEvent) => void }) {
     return (
-        <div 
+        <div
             className={`selection-checkbox ${isSelected ? 'checked' : ''}`}
             onClick={onClick}
             style={{
@@ -240,7 +241,7 @@ function SelectionCheckbox({ isSelected, onClick }: { isSelected: boolean, onCli
                 justifyContent: 'center',
                 cursor: 'pointer',
                 color: 'white',
-                opacity: isSelected ? 1 : 0, 
+                opacity: isSelected ? 1 : 0,
                 transition: 'all 0.2s ease',
             }}
         >
@@ -254,6 +255,7 @@ export function ItemCard({ item, compact = false, hideControls = false, variant 
         selectedItemIds,
         selectItem,
         isSelectionMode,
+        toggleSelectionMode,
         clipboard,
         setEditingItem,
         setSelectedFolder,
@@ -312,14 +314,14 @@ export function ItemCard({ item, compact = false, hideControls = false, variant 
     const handleDragStart = (e: React.DragEvent) => {
         // If not selected, select just this one for the drag (visually)
         // We don't force selection state update to avoid re-render flicker
-        
+
         const idsToDrag = isSelected && selectedItemIds.length > 0
             ? selectedItemIds
             : [item.id];
 
         e.dataTransfer.setData('application/json', JSON.stringify(idsToDrag));
         e.dataTransfer.effectAllowed = 'move';
-        
+
         // Native Ghost is used automatically.
         // We do NOT set setDragImage here to allow the browser to snapshot the card.
     };
@@ -337,21 +339,40 @@ export function ItemCard({ item, compact = false, hideControls = false, variant 
         gridStyles
     };
 
-    // Wrapper to handle Selection Checkbox & Draggability
+    // Long-press handlers for mobile selection mode
+    const longPressHandlers = useLongPress({
+        threshold: 400,
+        onLongPress: () => {
+            if (!hideControls) {
+                // Enter selection mode and select this item
+                if (!isSelectionMode) {
+                    toggleSelectionMode(true);
+                }
+                selectItem(item.id, true);
+                // Haptic feedback on mobile if available
+                if (navigator.vibrate) {
+                    navigator.vibrate(50);
+                }
+            }
+        },
+    });
+
+    // Wrapper to handle Selection Checkbox, Long-Press & Draggability
     const Wrapper = ({ children }: { children: React.ReactNode }) => (
-        <div 
+        <div
             className={`item-card-wrapper ${isSelectionMode ? 'selection-mode' : ''} ${isSelected ? 'selected' : ''}`}
             style={{ position: 'relative', height: variant === 'grid' ? '100%' : 'auto' }}
             draggable={!hideControls}
             onDragStart={!hideControls ? handleDragStart : undefined}
+            {...(!hideControls ? longPressHandlers : {})}
         >
             {!hideControls && (
-                <SelectionCheckbox 
-                    isSelected={isSelected} 
+                <SelectionCheckbox
+                    isSelected={isSelected}
                     onClick={(e) => {
                         e.stopPropagation();
                         selectItem(item.id, true);
-                    }} 
+                    }}
                 />
             )}
             {children}
@@ -414,7 +435,7 @@ function NoteCard({ item, colorClass, isSelected, isCut, onClick, onDoubleClick,
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            // draggable handled by wrapper
+        // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
             <PinIndicator isPinned={item.is_pinned} />
@@ -508,7 +529,7 @@ function FileCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMe
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            // draggable handled by wrapper
+        // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
             <PinIndicator isPinned={item.is_pinned} />
@@ -564,7 +585,7 @@ function LinkCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMe
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            // draggable handled by wrapper
+        // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
             <PinIndicator isPinned={item.is_pinned} />
@@ -586,9 +607,9 @@ function LinkCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextMe
                         {sanitizeString(content.description)}
                     </div>
                 )}
-                
+
                 {content.url && (
-                   <a href={content.url} target="_blank" rel="noopener noreferrer" className="card-content" style={{ color: '#1D4ED8', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem' }} onClick={(e) => e.stopPropagation()}>{content.url}</a>
+                    <a href={content.url} target="_blank" rel="noopener noreferrer" className="card-content" style={{ color: '#1D4ED8', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem' }} onClick={(e) => e.stopPropagation()}>{content.url}</a>
                 )}
             </div>
 
@@ -644,7 +665,7 @@ function ImageCard({ item, isSelected, isCut, onClick, onDoubleClick, onContextM
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            // draggable handled by wrapper
+        // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
             <PinIndicator isPinned={item.is_pinned} />
@@ -724,7 +745,7 @@ function FolderCard({ item, isSelected, isCut, onClick, onDoubleClick, onContext
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(e as any); }}
-            // draggable handled by wrapper
+        // draggable handled by wrapper
         >
             {!hideControls && <QuickActions item={item} />}
             <PinIndicator isPinned={item.is_pinned} />
