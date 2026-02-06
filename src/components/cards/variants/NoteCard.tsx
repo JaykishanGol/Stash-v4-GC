@@ -29,6 +29,25 @@ export const NoteCard = memo(function NoteCard({ item, colorClass, isSelected, i
 
     const hasChecklist = content.checklist && content.checklist.length > 0;
 
+    // Sort: unchecked items first, then checked — Google Keep style
+    const { sortedChecklist, checkedCount, totalCount, visibleCount } = useMemo(() => {
+        if (!hasChecklist || !content.checklist) return { sortedChecklist: [], checkedCount: 0, totalCount: 0, visibleCount: 0 };
+        const total = content.checklist.length;
+        const checked = content.checklist.filter(t => t.checked).length;
+        const unchecked = content.checklist.filter(t => !t.checked);
+        const checkedItems = content.checklist.filter(t => t.checked);
+        const sorted = [...unchecked, ...checkedItems];
+        const maxVisible = variant === 'grid' ? 5 : 7;
+        return {
+            sortedChecklist: sorted.slice(0, maxVisible),
+            checkedCount: checked,
+            totalCount: total,
+            visibleCount: Math.min(total, maxVisible),
+        };
+    }, [content.checklist, hasChecklist, variant]);
+
+    const remainingCount = hasChecklist ? (content.checklist!.length - visibleCount) : 0;
+
     const handleCheckToggle = (e: React.MouseEvent, todoId: string) => {
         e.stopPropagation();
         if (!content.checklist) return;
@@ -65,7 +84,21 @@ export const NoteCard = memo(function NoteCard({ item, colorClass, isSelected, i
             <div style={{ flex: variant === 'grid' ? 1 : undefined, overflow: 'hidden' }}>
                 {hasChecklist ? (
                     <div className="card-checklist">
-                        {content.checklist!.slice(0, variant === 'grid' ? 3 : 4).map((checkItem) => (
+                        {/* Progress bar */}
+                        {totalCount > 1 && (
+                            <div className="checklist-progress">
+                                <div className="checklist-progress-bar">
+                                    <div
+                                        className="checklist-progress-fill"
+                                        style={{ width: `${(checkedCount / totalCount) * 100}%` }}
+                                    />
+                                </div>
+                                <span className="checklist-progress-text">
+                                    {checkedCount}/{totalCount}
+                                </span>
+                            </div>
+                        )}
+                        {sortedChecklist.map((checkItem) => (
                             <div
                                 key={checkItem.id}
                                 className={`card-checklist-item ${checkItem.checked ? 'checked' : ''}`}
@@ -78,13 +111,18 @@ export const NoteCard = memo(function NoteCard({ item, colorClass, isSelected, i
                                 <span className="card-checklist-text">{checkItem.text || 'Untitled'}</span>
                             </div>
                         ))}
+                        {remainingCount > 0 && (
+                            <div className="card-checklist-more">
+                                +{remainingCount} more item{remainingCount > 1 ? 's' : ''}
+                            </div>
+                        )}
                     </div>
                 ) : content.text ? (
                     <div
                         className="card-content rich-text-content"
                         style={{
                             display: '-webkit-box',
-                            WebkitLineClamp: variant === 'grid' ? 5 : 8,
+                            WebkitLineClamp: variant === 'grid' ? 6 : 10,
                             WebkitBoxOrient: 'vertical',
                             overflow: 'hidden'
                         }}

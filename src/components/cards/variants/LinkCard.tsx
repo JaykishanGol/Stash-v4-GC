@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react';
+import { ExternalLink, Globe } from 'lucide-react';
 import type { Item, LinkContent } from '../../../lib/types';
 import { isLinkContent } from '../../../lib/types';
 import { extractDomain, sanitizeString } from '../../../lib/utils';
@@ -29,8 +30,8 @@ export const LinkCard = memo(function LinkCard({ item, isSelected, isCut, onClic
             tabIndex={0}
             aria-label={`Link: ${item.title || 'Untitled Link'}${isSelected ? ', selected' : ''}`}
             aria-selected={isSelected}
-            className={`card card-blue ${isSelected ? 'selected' : ''} ${isCut ? 'cut' : ''}`}
-            style={{ backgroundColor: item.bg_color !== '#FFFFFF' ? item.bg_color : undefined, ...gridStyles }}
+            className={`card card-link-styled ${isSelected ? 'selected' : ''} ${isCut ? 'cut' : ''}`}
+            style={{ backgroundColor: item.bg_color !== '#FFFFFF' ? item.bg_color : undefined, padding: 0, overflow: 'hidden', ...gridStyles }}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
@@ -40,40 +41,63 @@ export const LinkCard = memo(function LinkCard({ item, isSelected, isCut, onClic
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
-            <h3 className="card-title" title={item.title || content.title || domain || 'Untitled Link'}>
-                {item.title || content.title || domain || 'Untitled Link'}
-            </h3>
-
-            <div style={{ flex: variant === 'grid' ? 1 : undefined, display: 'flex', flexDirection: 'column' }}>
-                {content.image && (
-                    <div className="card-link-image" style={{ height: variant === 'grid' ? 80 : 120, margin: '8px 0', overflow: 'hidden', borderRadius: 4, flexShrink: 0 }}>
-                        <img src={content.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            {/* OG Image as card hero when available */}
+            {content.image && (
+                <div className="link-card-hero" style={{ position: 'relative' }}>
+                    <div style={{
+                        width: '100%',
+                        aspectRatio: '2/1',
+                        overflow: 'hidden',
+                        background: 'var(--bg-content, #f3f4f6)',
+                    }}>
+                        <img
+                            src={content.image}
+                            alt=""
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            loading="lazy"
+                        />
                     </div>
-                )}
+                </div>
+            )}
+
+            {/* Content section */}
+            <div style={{ padding: '12px 14px 10px', display: 'flex', flexDirection: 'column', gap: 6, flex: variant === 'grid' ? 1 : undefined }}>
+                <h3 className="card-title" title={item.title || content.title || domain || 'Untitled Link'} style={{ margin: 0, fontSize: '0.9375rem' }}>
+                    {item.title || content.title || domain || 'Untitled Link'}
+                </h3>
 
                 {content.description && (
-                    <div className="card-link-description" style={{ fontSize: '0.8rem', color: '#6B7280', marginBottom: 8, display: '-webkit-box', WebkitLineClamp: variant === 'grid' ? 2 : 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    <div style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary, #6B7280)',
+                        display: '-webkit-box',
+                        WebkitLineClamp: variant === 'grid' ? 2 : 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        lineHeight: 1.4,
+                    }}>
                         {sanitizeString(content.description)}
                     </div>
                 )}
 
-                {content.url && (
-                    <a href={content.url} target="_blank" rel="noopener noreferrer" className="card-content" style={{ color: '#1D4ED8', textDecoration: 'underline', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem' }} onClick={(e) => e.stopPropagation()}>{content.url}</a>
+                {/* Domain pill */}
+                {domain && (
+                    <div className="link-domain-pill">
+                        {content.favicon ? (
+                            <img src={content.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 2 }} />
+                        ) : (
+                            <Globe size={12} />
+                        )}
+                        <span>{domain}</span>
+                        <ExternalLink size={10} style={{ opacity: 0.5 }} />
+                    </div>
                 )}
-            </div>
 
-            <TagsDisplay tags={item.tags} />
-            <DateTimeIndicator item={item} />
+                <TagsDisplay tags={item.tags} />
+                <DateTimeIndicator item={item} />
 
-            <div className="card-meta" style={{ marginTop: 'auto' }}>
-                <span className="type-indicator link" title="Link" />
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {content.favicon && <img src={content.favicon} alt="" style={{ width: 14, height: 14 }} />}
-                    {domain && (
-                        <span style={{ fontSize: '0.75rem', color: '#6B7280' }}>
-                            {domain}
-                        </span>
-                    )}
+                <div className="card-meta" style={{ marginTop: 'auto', padding: 0, border: 'none' }}>
+                    <span className="type-indicator link" title="Link" />
                 </div>
             </div>
         </div>

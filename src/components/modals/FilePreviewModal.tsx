@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, File, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Code, RotateCcw } from 'lucide-react';
+import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, File, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Code, RotateCcw, Table } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { supabase, STORAGE_BUCKET, uploadFile } from '../../lib/supabase';
 import { generateId } from '../../lib/utils';
@@ -11,11 +11,28 @@ const getFileType = (mime: string, path: string) => {
     if (mime.startsWith('video/')) return 'video';
     if (mime.startsWith('audio/')) return 'audio';
     if (mime === 'application/pdf') return 'pdf';
+    // DOCX
+    if (
+        mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        mime === 'application/msword' ||
+        path.endsWith('.docx') ||
+        path.endsWith('.doc')
+    ) return 'docx';
+    // XLSX / CSV
+    if (
+        mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        mime === 'application/vnd.ms-excel' ||
+        mime === 'text/csv' ||
+        path.endsWith('.xlsx') ||
+        path.endsWith('.xls') ||
+        path.endsWith('.csv')
+    ) return 'spreadsheet';
+    // Markdown
+    if (mime === 'text/markdown' || path.endsWith('.md')) return 'markdown';
     if (
         mime.includes('text') ||
         mime.includes('json') ||
         mime.includes('javascript') ||
-        path.endsWith('.md') ||
         path.endsWith('.ts') ||
         path.endsWith('.tsx') ||
         path.endsWith('.py') ||
@@ -39,6 +56,8 @@ export function FilePreviewModal() {
     } = useAppStore();
     const [publicUrl, setPublicUrl] = useState<string | null>(null);
     const [textContent, setTextContent] = useState<string | null>(null);
+    const [docxHtml, setDocxHtml] = useState<string | null>(null);
+    const [spreadsheetData, setSpreadsheetData] = useState<string[][] | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [scale, setScale] = useState(1);
     const [lastItemId, setLastItemId] = useState<string | null>(null);
@@ -53,6 +72,8 @@ export function FilePreviewModal() {
             setIsLoading(true);
             setPublicUrl(null);
             setTextContent(null);
+            setDocxHtml(null);
+            setSpreadsheetData(null);
             setScale(1);
         }
     }
@@ -93,6 +114,8 @@ export function FilePreviewModal() {
         setPreviewingItem(null);
         setPublicUrl(null);
         setTextContent(null);
+        setDocxHtml(null);
+        setSpreadsheetData(null);
         setScale(1);
     }, [setPreviewingItem]);
 
@@ -116,27 +139,60 @@ export function FilePreviewModal() {
             const type = getFileType(mime, path);
 
             const fetchUrl = async () => {
-                if (path.startsWith('http')) {
-                    setPublicUrl(path);
-                    setIsLoading(false);
-                    return;
-                }
+                let resolvedUrl = path;
 
-                const { data } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
-                if (data?.signedUrl) {
-                    setPublicUrl(data.signedUrl);
-
-                    if (type === 'code') {
-                        try {
-                            const response = await fetch(data.signedUrl);
-                            const text = await response.text();
-                            setTextContent(text);
-                        } catch (err) {
-                            console.error("Failed to fetch text content", err);
-                            setTextContent("Error loading content.");
-                        }
+                if (!path.startsWith('http')) {
+                    const { data } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, 3600);
+                    if (data?.signedUrl) {
+                        resolvedUrl = data.signedUrl;
                     }
                 }
+
+                setPublicUrl(resolvedUrl);
+
+                // Load DOCX content
+                if (type === 'docx') {
+                    try {
+                        const mammoth = await import('mammoth');
+                        const response = await fetch(resolvedUrl);
+                        const arrayBuffer = await response.arrayBuffer();
+                        const result = await mammoth.convertToHtml({ arrayBuffer });
+                        setDocxHtml(result.value);
+                    } catch (err) {
+                        console.error('Failed to render DOCX:', err);
+                        setDocxHtml('<p style="color:#ef4444">Failed to load document. Try downloading instead.</p>');
+                    }
+                }
+
+                // Load Spreadsheet content (XLSX / CSV)
+                if (type === 'spreadsheet') {
+                    try {
+                        const XLSX = await import('xlsx');
+                        const response = await fetch(resolvedUrl);
+                        const arrayBuffer = await response.arrayBuffer();
+                        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1 });
+                        // Limit to first 200 rows for performance
+                        setSpreadsheetData((jsonData as string[][]).slice(0, 200));
+                    } catch (err) {
+                        console.error('Failed to render spreadsheet:', err);
+                        setSpreadsheetData([['Error loading spreadsheet. Try downloading instead.']]);
+                    }
+                }
+
+                // Load code/text content
+                if (type === 'code' || type === 'markdown') {
+                    try {
+                        const response = await fetch(resolvedUrl);
+                        const text = await response.text();
+                        setTextContent(text);
+                    } catch (err) {
+                        console.error("Failed to fetch text content", err);
+                        setTextContent("Error loading content.");
+                    }
+                }
+
                 setIsLoading(false);
             };
 
@@ -284,8 +340,10 @@ export function FilePreviewModal() {
                         {type === 'image' ? <ImageIcon size={20} color="#F59E0B" /> :
                             type === 'video' ? <Film size={20} color="#3B82F6" /> :
                                 type === 'audio' ? <Music size={20} color="#EC4899" /> :
-                                    type === 'code' ? <Code size={20} color="#10B981" /> :
-                                        <FileText size={20} color="#9CA3AF" />}
+                                    type === 'code' || type === 'markdown' ? <Code size={20} color="#10B981" /> :
+                                        type === 'docx' ? <FileText size={20} color="#2563EB" /> :
+                                            type === 'spreadsheet' ? <Table size={20} color="#16A34A" /> :
+                                                <FileText size={20} color="#9CA3AF" />}
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                             <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.95rem' }}>
                                 {previewingItem.title}
@@ -342,11 +400,85 @@ export function FilePreviewModal() {
                                 </div>
                             )}
 
-                            {type === 'code' && (
+                            {(type === 'code' || type === 'markdown') && (
                                 <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '24px', background: '#1e1e1e' }}>
                                     <pre style={{ margin: 0, fontFamily: "'Fira Code', monospace", fontSize: '0.9rem', color: '#e5e5e5', lineHeight: 1.6 }}>
                                         <code>{textContent || 'Loading text...'}</code>
                                     </pre>
+                                </div>
+                            )}
+
+                            {type === 'docx' && (
+                                <div style={{ width: '100%', height: '100%', overflow: 'auto', padding: '32px 48px', background: '#fff' }}>
+                                    {docxHtml ? (
+                                        <div
+                                            className="docx-preview-content"
+                                            dangerouslySetInnerHTML={{ __html: docxHtml }}
+                                            style={{
+                                                maxWidth: 800,
+                                                margin: '0 auto',
+                                                fontFamily: 'Georgia, "Times New Roman", serif',
+                                                fontSize: '1rem',
+                                                lineHeight: 1.7,
+                                                color: '#1a1a1a',
+                                            }}
+                                        />
+                                    ) : (
+                                        <div style={{ color: '#666', textAlign: 'center', padding: 40 }}>Loading document...</div>
+                                    )}
+                                </div>
+                            )}
+
+                            {type === 'spreadsheet' && (
+                                <div style={{ width: '100%', height: '100%', overflow: 'auto', background: '#fff' }}>
+                                    {spreadsheetData ? (
+                                        <table style={{
+                                            borderCollapse: 'collapse',
+                                            width: '100%',
+                                            fontFamily: "'DM Sans', sans-serif",
+                                            fontSize: '0.85rem',
+                                        }}>
+                                            <thead>
+                                                {spreadsheetData.length > 0 && (
+                                                    <tr>
+                                                        {(spreadsheetData[0] || []).map((cell, i) => (
+                                                            <th key={i} style={{
+                                                                padding: '10px 14px',
+                                                                borderBottom: '2px solid #e5e7eb',
+                                                                background: '#f9fafb',
+                                                                textAlign: 'left',
+                                                                fontWeight: 600,
+                                                                color: '#374151',
+                                                                position: 'sticky',
+                                                                top: 0,
+                                                                whiteSpace: 'nowrap',
+                                                            }}>
+                                                                {String(cell ?? '')}
+                                                            </th>
+                                                        ))}
+                                                    </tr>
+                                                )}
+                                            </thead>
+                                            <tbody>
+                                                {spreadsheetData.slice(1).map((row, ri) => (
+                                                    <tr key={ri} style={{ background: ri % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                                        {row.map((cell, ci) => (
+                                                            <td key={ci} style={{
+                                                                padding: '8px 14px',
+                                                                borderBottom: '1px solid #f3f4f6',
+                                                                color: '#4b5563',
+                                                                whiteSpace: 'nowrap',
+                                                            }}>
+                                                                {String(cell ?? '')}
+                                                            </td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    ) : (
+                                        <div style={{ color: '#666', textAlign: 'center', padding: 40 }}>Loading spreadsheet...</div>
+                                    )}
                                 </div>
                             )}
 

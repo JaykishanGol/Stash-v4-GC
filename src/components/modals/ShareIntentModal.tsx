@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Check, Folder, Palette, AlertCircle, List as ListIcon, Calendar, Image as ImageIcon, FileText } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { supabase, STORAGE_BUCKET } from '../../lib/supabase'; // Import bucket constant
+import { uploadFile } from '../../lib/supabase';
 import type { Item, PriorityLevel, CardColor } from '../../lib/types';
 import { CARD_COLORS } from '../../lib/types';
 import { SchedulerContent } from './SchedulerModal';
@@ -79,40 +79,27 @@ export function ShareIntentModal() {
                 }
 
                 try {
-                    // 1. Fetch the blob from the local URL
+                    // 1. Fetch the blob and create a proper File object
                     const response = await fetch(finalItem.file_meta.path);
                     const blob = await response.blob();
+                    const fileName = finalItem.file_meta.originalName || finalItem.title || 'file';
+                    const file = new File([blob], fileName, { type: blob.type || finalItem.file_meta.mime });
 
-                    // 2. Upload to storage bucket
-                    const userId = finalItem.user_id;
-                    const timestamp = Date.now();
-                    // Add random string to avoid collision in batch
-                    const random = Math.random().toString(36).substring(7);
-                    const sanitizedName = finalItem.file_meta.originalName?.replace(/[^a-zA-Z0-9.-]/g, '_') || 'file';
-                    const filePath = `${userId}/${timestamp}_${random}_${sanitizedName}`;
-
-                    const { error } = await supabase
-                        .storage
-                        .from(STORAGE_BUCKET)
-                        .upload(filePath, blob, {
-                            cacheControl: '3600',
-                            upsert: false
-                        });
+                    // 2. Upload using the shared uploadFile utility (has retry logic)
+                    const { url, error } = await uploadFile(
+                        file,
+                        finalItem.user_id,
+                        finalItem.type === 'image' ? 'image' : 'file'
+                    );
 
                     if (error) throw error;
 
-                    // 3. Get Public URL
-                    const { data: urlData } = supabase
-                        .storage
-                        .from(STORAGE_BUCKET)
-                        .getPublicUrl(filePath);
-
-                    // 4. Update item with remote URL
+                    // 3. Update item with remote URL
                     if (finalItem.file_meta) {
-                        finalItem.file_meta.path = urlData.publicUrl;
+                        finalItem.file_meta.path = url;
                     }
 
-                    // Revoke the local blob URL
+                    // Revoke the local blob URL to free memory
                     URL.revokeObjectURL(item.file_meta!.path);
 
                     // Add item after successful upload

@@ -49,54 +49,53 @@ export const ImageCard = memo(function ImageCard({ item, isSelected, isCut, onCl
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
-            {/* Image fills the card with aspect-ratio */}
-            <div
-                className="card-image-preview"
-                style={{
-                    width: '100%',
-                    aspectRatio: variant === 'grid' ? '4/3' : '16/9',
-                    background: 'rgba(0, 0, 0, 0.04)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                    position: 'relative',
-                    flexShrink: 0,
-                }}
-            >
-                {imagePath ? (
-                    <SecureImage
-                        path={imagePath}
-                        alt={cleanTitle}
-                        style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                        }}
-                    />
-                ) : (
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                        <circle cx="8.5" cy="8.5" r="1.5" />
-                        <polyline points="21 15 16 10 5 21" />
-                    </svg>
-                )}
+            {/* Image fills the card — gradient scrim for title overlay */}
+            <div className="image-card-hero" style={{ position: 'relative', width: '100%', flexShrink: 0 }}>
+                <div
+                    className="card-image-preview"
+                    style={{
+                        width: '100%',
+                        aspectRatio: variant === 'grid' ? '4/3' : '16/9',
+                        background: 'var(--bg-content, #f3f4f6)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
+                    }}
+                >
+                    {imagePath ? (
+                        <SecureImage
+                            path={imagePath}
+                            alt={cleanTitle}
+                            style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                            }}
+                        />
+                    ) : (
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted, #9CA3AF)" strokeWidth="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                    )}
+                </div>
+                {/* Gradient scrim for title readability */}
+                <div className="image-card-scrim" />
+                {/* Title overlay on image */}
+                <div className="image-card-overlay-title">
+                    <span>{cleanTitle}</span>
+                    {fileSize && <span className="image-card-size">{fileSize}</span>}
+                </div>
             </div>
 
-            {/* Compact info footer */}
-            <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <h3 className="card-title" title={cleanTitle} style={{ fontSize: '0.875rem', margin: 0 }}>{cleanTitle}</h3>
-
+            {/* Compact footer for tags/date */}
+            <div style={{ padding: '6px 12px 8px' }}>
                 <TagsDisplay tags={item.tags} />
                 <DateTimeIndicator item={item} />
-
                 <div className="card-meta" style={{ marginTop: 2, padding: 0, border: 'none' }}>
                     <span className="type-indicator image" title="Image" />
-                    {fileSize && (
-                        <span style={{ fontSize: '0.7rem', color: '#9CA3AF', marginLeft: 'auto' }}>
-                            {fileSize}
-                        </span>
-                    )}
                 </div>
             </div>
         </div>

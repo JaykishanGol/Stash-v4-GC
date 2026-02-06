@@ -14,6 +14,7 @@ import { useSmartPaste } from './hooks/useSmartPaste';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { useAuth } from './hooks/useAuth';
+import { useTheme } from './hooks/useTheme';
 import { useAppStore } from './store/useAppStore';
 import { useMobileBackHandler } from './hooks/useMobileBackHandler';
 import { useRealtimeSubscription } from './hooks/useRealtime';
@@ -57,6 +58,7 @@ function App() {
   useKeyboardNavigation(); // Premium keyboard navigation
   useMobileBackHandler(); // Handle mobile back gestures
   useRealtimeSubscription(); // Enable Realtime Sync
+  useTheme(); // Apply theme (data-theme attr) + system preference detection
 
   // Process any pending offline sync operations on startup
   useEffect(() => {
