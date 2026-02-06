@@ -53,7 +53,7 @@ export function CalendarFAB({ selectedDate }: CalendarFABProps) {
         const newEvent = await addEvent({
             user_id: user?.id || 'demo',
             title: quickTitle.trim(),
-            description: null,
+            description: '',
             start_at: new Date(startIso).toISOString(),
             end_at: new Date(endIso).toISOString(),
             is_all_day: quickIsAllDay,
@@ -61,7 +61,7 @@ export function CalendarFAB({ selectedDate }: CalendarFABProps) {
             parent_event_id: null,
             recurring_event_id: null,
             is_deleted_instance: false,
-            location: null,
+            location: '',
             color_id: '7',
             visibility: 'default',
             transparency: 'opaque',
@@ -70,7 +70,7 @@ export function CalendarFAB({ selectedDate }: CalendarFABProps) {
             conference_data: null,
             reminders: [{ method: 'popup', minutes: 10 }],
             google_event_id: null,
-            google_calendar_id: null,
+            google_calendar_id: 'primary',
             deleted_at: null,
             is_unsynced: true,
         });

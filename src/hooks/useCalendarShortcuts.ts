@@ -15,7 +15,7 @@
  * Only fires when no input/textarea/contenteditable is focused.
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface CalendarShortcutActions {
     goToToday: () => void;

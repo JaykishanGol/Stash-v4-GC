@@ -172,12 +172,12 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
 
             const updates: Partial<CalendarEvent> = {
                 title,
-                description: description || null,
+                description: description || undefined,
                 start_at: startIso,
                 end_at: endIso,
                 is_all_day: isAllDay,
                 rrule: buildRruleFromPreset(recurrence),
-                location: location || null,
+                location: location || undefined,
                 color_id: colorId,
                 visibility: visibility,
                 transparency: showAs === 'free' ? 'transparent' : 'opaque',
@@ -185,7 +185,7 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
                 attendees: attendees.map(email => ({ email, responseStatus: 'needsAction' })),
                 conference_data: addMeet ? { meetLink: 'pending', entryPoints: [] } : null,
                 reminders: notifications.map(n => ({ method: n.method, minutes: n.minutes })),
-                google_calendar_id: calendarId !== 'primary' ? calendarId : null,
+                google_calendar_id: calendarId !== 'primary' ? calendarId : undefined,
             };
 
             await updateEvent(event.id, updates, mode, originalStart || undefined);

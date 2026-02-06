@@ -5,7 +5,7 @@
  * summary with edit/delete actions. Positioned near the clicked element.
  */
 
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import {
     Clock, MapPin, Trash2, Edit2, X,
     Repeat, Users, Video, AlignLeft
@@ -35,7 +35,7 @@ export function EventPopover({
     onDeleted,
 }: EventPopoverProps) {
     const popoverRef = useRef<HTMLDivElement>(null);
-    const { openEventScheduler, updateEvent, deleteEvent } = useAppStore();
+    const { openEventScheduler, deleteEvent } = useAppStore();
 
     // Recurrence dialog for delete
     const [recurrenceDeleteDialog, setRecurrenceDeleteDialog] = useState(false);

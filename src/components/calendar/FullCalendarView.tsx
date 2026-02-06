@@ -13,13 +13,13 @@
  *  - Tasks rendered with checkbox icon
  */
 
-import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
-import type { EventClickArg, EventDropArg, DateSelectArg, EventContentArg, DatesSetArg, EventResizeDoneArg } from '@fullcalendar/core';
+import type { EventClickArg, EventDropArg, DateSelectArg, EventContentArg, DatesSetArg } from '@fullcalendar/core';
 import { useAppStore } from '../../store/useAppStore';
 import { expandEventsForRange, toFullCalendarEvent } from '../../lib/eventExpander';
 import { EventPopover } from './EventPopover';
@@ -141,7 +141,8 @@ export function FullCalendarView({
 
     // Resize an event (change end time by dragging edge)
     const handleEventResize = useCallback(
-        (info: EventResizeDoneArg) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (info: any) => {
             if (!onEventResize) return;
             const props = info.event.extendedProps;
             const newStart = info.event.start!;
