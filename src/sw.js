@@ -87,17 +87,18 @@ self.addEventListener('activate', (event) => {
 
 // --- Share Target Handler ---
 
-// Open DB helper
+// Open DB helper (non-destructive upgrades)
 function openShareDB() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(SHARE_DB_NAME, SHARE_DB_VERSION);
     
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
-      if (db.objectStoreNames.contains(SHARE_STORE_NAME)) {
-          db.deleteObjectStore(SHARE_STORE_NAME);
+      // NON-DESTRUCTIVE: only create if missing, never delete existing data
+      if (!db.objectStoreNames.contains(SHARE_STORE_NAME)) {
+        db.createObjectStore(SHARE_STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        console.log('[SW] Created share object store');
       }
-      db.createObjectStore(SHARE_STORE_NAME, { keyPath: 'id', autoIncrement: true });
     };
     
     request.onsuccess = () => resolve(request.result);
@@ -118,7 +119,26 @@ async function storeShare(data) {
     const request = store.add(data);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
+    tx.oncomplete = () => db.close(); // Clean up DB connection
   });
+}
+
+// Notify existing app window or open new one after share
+async function notifyClients() {
+  const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  
+  if (allClients.length > 0) {
+    // App is already open — send message (avoids full page reload)
+    for (const client of allClients) {
+      client.postMessage({ type: 'SHARE_RECEIVED' });
+    }
+    // Focus the first window
+    if ('focus' in allClients[0]) {
+      await allClients[0].focus();
+    }
+    return true;
+  }
+  return false;
 }
 
 self.addEventListener('fetch', (event) => {
@@ -145,7 +165,7 @@ self.addEventListener('fetch', (event) => {
           // Handle Files
           if (mediaFiles && mediaFiles.length > 0) {
             shareData.files = await Promise.all(mediaFiles.map(async (file) => {
-              if (file.size > 0) {
+              if (file && file.size > 0) {
                 return {
                   name: file.name,
                   type: file.type,
@@ -160,7 +180,16 @@ self.addEventListener('fetch', (event) => {
           // Save to IDB
           await storeShare(shareData);
 
-          // Redirect to app
+          // Try to notify existing app window (fast path — no reload)
+          const notified = await notifyClients();
+          
+          if (notified) {
+            // App is open, we sent SHARE_RECEIVED message. 
+            // Redirect to root (the app handles it via message listener).
+            return Response.redirect('/', 303);
+          }
+          
+          // No existing window — redirect with param so app picks up on load
           return Response.redirect('/?share_target=true', 303);
         } catch (err) {
           console.error('[SW] Share target error:', err);

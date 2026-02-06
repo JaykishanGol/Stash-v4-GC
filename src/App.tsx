@@ -19,7 +19,7 @@ import { useAppStore } from './store/useAppStore';
 import { useMobileBackHandler } from './hooks/useMobileBackHandler';
 import { useRealtimeSubscription } from './hooks/useRealtime';
 import { persistentSyncQueue } from './lib/persistentQueue';
-import { getPendingShares, processShare, clearPendingShares } from './lib/shareHandler';
+import { getPendingShares, processShare, clearPendingShares, type ShareItem } from './lib/shareHandler';
 import { isSupabaseConfigured } from './lib/supabase';
 import './index.css';
 
@@ -65,12 +65,44 @@ function App() {
     persistentSyncQueue.process();
   }, []);
 
-  // Listen for service worker notification action messages
+  // Shared function to process incoming shares from IDB
+  const handleIncomingShare = async () => {
+    try {
+      const shares = await getPendingShares();
+      if (shares.length === 0) return;
+      
+      const share = shares[0];
+      await clearPendingShares();
+
+      const currentUser = useAppStore.getState().user;
+      const newItems = processShare(share, currentUser?.id || 'demo');
+      if (newItems && newItems.length > 0) {
+        console.log('[Share] Processed into items:', newItems.length);
+        setPendingShareItems(newItems as ShareItem[]);
+      } else {
+        addNotification('error', 'Import Failed', 'Could not process shared content');
+      }
+    } catch (err) {
+      console.error('[Share] Failed to process:', err);
+      addNotification('error', 'Import Failed', 'Error reading shared data');
+    }
+  };
+
+  // Listen for service worker messages (notifications + share target)
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
     const handleSWMessage = (event: MessageEvent) => {
       const { type, action, data } = event.data || {};
+
+      // --- SHARE RECEIVED (fast path — no page reload) ---
+      if (type === 'SHARE_RECEIVED') {
+        console.log('[Share] Received via postMessage (fast path)');
+        handleIncomingShare();
+        return;
+      }
+
+      // --- NOTIFICATION ACTIONS ---
       if (type !== 'NOTIFICATION_ACTION' || !data?.itemId) return;
 
       const store = useAppStore.getState();
@@ -129,35 +161,16 @@ function App() {
     }
   }, [user, fetchNotifications]);
 
-  // Handle Share Target
+  // Handle Share Target (fallback for cold-start when no window was open)
   useEffect(() => {
     // Don't process shares until auth has finished loading
     if (isLoading) return;
 
     const url = new URL(window.location.href);
     if (url.searchParams.has('share_target')) {
-      console.log('Share target detected');
-      addNotification('info', 'Importing...', 'Processing shared content');
-
-      getPendingShares().then(async (shares) => {
-        console.log('Shares found:', shares);
-        if (shares.length > 0) {
-          const share = shares[0]; // Process first one
-          // Clean up DB immediately so we don't re-process on reload, 
-          // but we have the data in memory now 'share' variable
-          await clearPendingShares();
-
-          const newItems = processShare(share, user?.id || 'demo');
-          if (newItems && newItems.length > 0) {
-            console.log('Share processed into items:', newItems);
-            setPendingShareItems(newItems);
-          } else {
-            console.error('Failed to process share data');
-            addNotification('error', 'Import Failed', 'Could not process shared content');
-          }
-        }
-      });
-      // Clean URL
+      console.log('[Share] Detected via URL param (cold start)');
+      handleIncomingShare();
+      // Clean URL immediately
       url.searchParams.delete('share_target');
       window.history.replaceState({}, '', url.toString());
     }
