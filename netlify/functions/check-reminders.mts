@@ -98,7 +98,8 @@ export default async (req, context) => {
 
             // Send notification for each due item
             for (const item of items) {
-                const isTask = 'item_ids' in item;
+                // Use the `type` column from the RPC — 'task' for tasks, item type for items
+                const isTask = item.type === 'task';
                 const scheduledDate = item.scheduled_at ? new Date(item.scheduled_at) : null;
                 const timeStr = scheduledDate
                     ? scheduledDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
@@ -110,8 +111,8 @@ export default async (req, context) => {
                 // Rich title with priority indicator
                 const priorityEmoji = item.priority === 'high' ? '🔴 ' : item.priority === 'medium' ? '🟡 ' : item.priority === 'low' ? '🔵 ' : '';
                 const title = isTask
-                    ? `${priorityEmoji}📋 Task Due: ${item.title}`
-                    : `${priorityEmoji}⏰ Reminder: ${item.title}`;
+                    ? `${priorityEmoji}Task Due: ${item.title}`
+                    : `${priorityEmoji}Reminder: ${item.title}`;
 
                 // Rich body with context
                 const bodyParts: string[] = [];
@@ -121,21 +122,21 @@ export default async (req, context) => {
                     bodyParts.push(isOverdue ? `⚠️ Was due at ${timeStr} on ${dateStr}` : `📅 ${dateStr} at ${timeStr}`);
                 }
 
-                if (item.remind_before) {
+                if (item.remind_before && item.remind_before > 0) {
                     bodyParts.push(`🔔 ${item.remind_before}min early reminder`);
                 }
 
-                // Add description preview if available
+                // Add description preview if available (RPC now returns these columns)
                 if (isTask && item.description) {
                     bodyParts.push(item.description.substring(0, 80));
                 } else if (!isTask && item.content) {
-                    const text = typeof item.content === 'object' && item.content.text
+                    const text = typeof item.content === 'object' && item.content?.text
                         ? item.content.text.substring(0, 80)
                         : '';
                     if (text) bodyParts.push(text);
                 }
 
-                // Item type indicator
+                // Item type indicator for non-tasks
                 if (!isTask && item.type) {
                     const typeLabels: Record<string, string> = { note: '📝 Note', link: '🔗 Link', file: '📎 File', image: '🖼️ Image', folder: '📂 Folder' };
                     bodyParts.push(typeLabels[item.type] || item.type);
@@ -154,7 +155,7 @@ export default async (req, context) => {
                         message: body,
                         data: { 
                             itemId: item.id, 
-                            type: isTask ? 'task' : 'item',
+                            type: isTask ? 'task' : item.type,
                             priority: item.priority || 'none',
                             scheduledAt: item.scheduled_at,
                             itemType: item.type || null
@@ -175,7 +176,7 @@ export default async (req, context) => {
                     tag: item.id,
                     data: {
                         itemId: item.id,
-                        type: isTask ? 'task' : 'item',
+                        type: isTask ? 'task' : item.type,
                         priority: item.priority || 'none',
                         scheduledAt: item.scheduled_at,
                         url: `/?open=${isTask ? 'task' : 'item'}&id=${item.id}`
@@ -220,7 +221,7 @@ export default async (req, context) => {
                 }
 
                 // Update last_acknowledged_at to prevent duplicate notifications
-                const table = isTask ? 'tasks' : 'items';
+                const table = item.type === 'task' ? 'tasks' : 'items';
                 await supabase
                     .from(table)
                     .update({ last_acknowledged_at: now })

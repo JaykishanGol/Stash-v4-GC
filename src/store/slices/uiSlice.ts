@@ -32,6 +32,8 @@ export interface AppNotification {
     message: string;
     timestamp: string;
     read: boolean;
+    itemId?: string;
+    itemType?: string; // 'task' | 'note' | 'link' | 'image' | 'file' | 'folder'
 }
 
 export interface UISlice {
@@ -240,6 +242,12 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     clearFilters: () => set({ filters: { type: null, priority: null }, searchQuery: '' }),
 
     fetchNotifications: async () => {
+        // Clean up notifications older than 30 days server-side
+        await supabase
+            .from('notifications')
+            .delete()
+            .lt('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+
         const { data, error } = await supabase
             .from('notifications')
             .select('*')
@@ -253,7 +261,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
                 title: n.title,
                 message: n.message,
                 timestamp: n.created_at,
-                read: n.is_read
+                read: n.is_read,
+                itemId: n.data?.itemId || undefined,
+                itemType: n.data?.type || n.data?.itemType || undefined,
             }));
             set({ notifications: mapped });
         }

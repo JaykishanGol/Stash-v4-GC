@@ -62,60 +62,16 @@ export function ToastListener() {
     useEffect(() => {
         if (notifications.length > 0) {
             const latest = notifications[0];
-            console.log('[ToastListener] New notification detected:', { id: latest.id, title: latest.title, type: latest.type });
 
             if (latest.id !== lastNotifiedId.current) {
                 lastNotifiedId.current = latest.id;
 
-                // Trigger toast
+                // Trigger in-app toast only — browser push notifications
+                // are handled by the service worker via web-push from the server.
+                // Creating Notification() here would cause duplicates.
                 showToast(latest.message, latest.type as any, {
                     duration: latest.type === 'error' ? 6000 : 4000
                 });
-
-                // Trigger Browser Notification for Reminders
-                const isReminder = latest.title.startsWith('Reminder:') || latest.title.startsWith('Task Due:');
-                console.log('[ToastListener] Browser notification check:', {
-                    hasNotificationAPI: 'Notification' in window,
-                    permission: 'Notification' in window ? Notification.permission : 'N/A',
-                    isReminder,
-                    titleStartsWith: latest.title.substring(0, 15)
-                });
-
-                if (
-                    'Notification' in window &&
-                    Notification.permission === 'granted' &&
-                    isReminder
-                ) {
-                    console.log('[ToastListener] 🔔 Triggering browser push notification!');
-
-                    // Use Notification API directly (more reliable than SW)
-                    try {
-                        const notif = new Notification(latest.title, {
-                            body: latest.message,
-                            icon: '/vite.svg',
-                            tag: latest.id,
-                            requireInteraction: true // Keep notification visible
-                        });
-                        console.log('[ToastListener] ✅ Notification created successfully');
-
-                        notif.onclick = () => {
-                            window.focus();
-                            notif.close();
-                        };
-                    } catch (e) {
-                        console.error('[ToastListener] Direct notification failed, trying SW:', e);
-                        // Fallback to service worker
-                        if ('serviceWorker' in navigator) {
-                            navigator.serviceWorker.ready.then(registration => {
-                                registration.showNotification(latest.title, {
-                                    body: latest.message,
-                                    icon: '/vite.svg',
-                                    tag: latest.id
-                                });
-                            }).catch(err => console.error('[ToastListener] SW notification also failed:', err));
-                        }
-                    }
-                }
             }
         }
     }, [notifications, showToast]);

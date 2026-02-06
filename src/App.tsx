@@ -132,9 +132,9 @@ function App() {
       } else if (action === 'snooze') {
         const newTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
         if (itemType === 'task') {
-          store.updateTask(id, { scheduled_at: newTime });
+          store.updateTask(id, { scheduled_at: newTime, last_acknowledged_at: null } as any);
         } else {
-          store.updateItem(id, { scheduled_at: newTime });
+          store.updateItem(id, { scheduled_at: newTime, last_acknowledged_at: null } as any);
         }
         addNotification('info', 'Snoozed', 'Reminder snoozed for 10 minutes');
       } else {

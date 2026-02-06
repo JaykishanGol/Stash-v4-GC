@@ -56,6 +56,8 @@ export function FullCalendarView({
     calendarRef,
 }: FullCalendarViewProps) {
     const calendarEvents = useAppStore((s) => s.calendarEvents);
+    const items = useAppStore((s) => s.items);
+    const tasks = useAppStore((s) => s.tasks);
     const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date }>({
         start: new Date(),
         end: new Date(),
@@ -71,17 +73,102 @@ export function FullCalendarView({
         setVisibleRange({ start: arg.start, end: arg.end });
     }, []);
 
-    // Expand recurring events for the visible range
+    // Expand recurring events for the visible range + merge scheduled items/tasks
     const fcEvents = useMemo(() => {
         if (!visibleRange.start || !visibleRange.end) return [];
         const expanded = expandEventsForRange(calendarEvents, visibleRange.start, visibleRange.end);
-        return expanded.map(toFullCalendarEvent);
-    }, [calendarEvents, visibleRange]);
+        const calEvents = expanded.map(toFullCalendarEvent);
 
-    // Click on an event — show popover instead of opening scheduler directly
+        // Color map for item types
+        const typeColors: Record<string, string> = {
+            note: '#4285f4',   // Google blue
+            link: '#0b8043',   // Google green
+            image: '#8e24aa',  // Purple
+            file: '#616161',   // Gray
+            folder: '#f4b400', // Google yellow
+        };
+
+        // Add scheduled items (non-deleted, with scheduled_at)
+        const scheduledItems = items
+            .filter(i => i.scheduled_at && !i.deleted_at)
+            .filter(i => {
+                const d = new Date(i.scheduled_at!);
+                return d >= visibleRange.start && d <= visibleRange.end;
+            })
+            .map(item => {
+                const start = new Date(item.scheduled_at!);
+                const color = typeColors[item.type] || '#4285f4';
+                return {
+                    id: `item-${item.id}`,
+                    title: item.title || 'Untitled',
+                    start,
+                    end: new Date(start.getTime() + 30 * 60 * 1000), // 30 min default
+                    allDay: false,
+                    backgroundColor: color,
+                    borderColor: color,
+                    textColor: '#ffffff',
+                    extendedProps: {
+                        eventId: item.id,
+                        isScheduledItem: true,
+                        itemType: item.type,
+                        isTask: false,
+                    },
+                };
+            });
+
+        // Add scheduled tasks (non-deleted, with scheduled_at)
+        const scheduledTasks = tasks
+            .filter(t => t.scheduled_at && !t.deleted_at && !t.is_completed)
+            .filter(t => {
+                const d = new Date(t.scheduled_at!);
+                return d >= visibleRange.start && d <= visibleRange.end;
+            })
+            .map(task => {
+                const start = new Date(task.scheduled_at!);
+                const priorityColors: Record<string, string> = {
+                    high: '#d93025',   // Red
+                    medium: '#f4b400', // Yellow
+                    low: '#1a73e8',    // Blue
+                };
+                const color = priorityColors[task.priority || ''] || '#039be5';
+                return {
+                    id: `task-${task.id}`,
+                    title: task.title || 'Untitled Task',
+                    start,
+                    end: new Date(start.getTime() + 30 * 60 * 1000),
+                    allDay: false,
+                    backgroundColor: color,
+                    borderColor: color,
+                    textColor: '#ffffff',
+                    extendedProps: {
+                        eventId: task.id,
+                        isScheduledItem: true,
+                        isTask: true,
+                        priority: task.priority,
+                    },
+                };
+            });
+
+        return [...calEvents, ...scheduledItems, ...scheduledTasks];
+    }, [calendarEvents, items, tasks, visibleRange]);
+
+    // Click on an event — show popover for calendar events, navigate for items/tasks
     const handleEventClick = useCallback(
         (info: EventClickArg) => {
             const props = info.event.extendedProps;
+
+            // Scheduled items/tasks → open editor/task directly
+            if (props.isScheduledItem) {
+                const id = props.eventId;
+                if (props.isTask) {
+                    useAppStore.getState().setSelectedTask(id);
+                } else {
+                    const item = useAppStore.getState().items.find(i => i.id === id);
+                    if (item) useAppStore.getState().setEditingItem(item);
+                }
+                return;
+            }
+
             const calEvent = props.calendarEvent as CalendarEvent | undefined;
 
             if (!calEvent) {

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bell, Check, Trash2, X, CheckCircle, Info, AlertTriangle, XCircle, Zap } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import type { AppNotification } from '../../store/slices/uiSlice';
 
 export function NotificationCenter() {
     const [isOpen, setIsOpen] = useState(false);
@@ -9,7 +10,10 @@ export function NotificationCenter() {
         notifications,
         markNotificationRead,
         markAllNotificationsRead,
-        clearNotifications
+        clearNotifications,
+        setEditingItem,
+        setSelectedTask,
+        items,
     } = useAppStore();
 
     const unreadCount = notifications.filter(n => !n.read).length;
@@ -80,16 +84,21 @@ export function NotificationCenter() {
         return date.toLocaleDateString();
     };
 
-    const handleNotificationClick = (notification: any) => {
+    const handleNotificationClick = (notification: AppNotification) => {
         markNotificationRead(notification.id);
         
-        // Try to navigate if there's context
-        // We look for entity info in the message or data (if we added structured data support)
-        // Since we don't have structured data in local notifications yet, we'll try to find items by title for now, 
-        // or just rely on the user manually navigating. 
-        // Ideally, we'd add `data: { entityId: ... }` to `addNotification`.
+        // Navigate to the item/task if we have context
+        if (notification.itemId) {
+            if (notification.itemType === 'task') {
+                setSelectedTask(notification.itemId);
+            } else {
+                const item = items.find(i => i.id === notification.itemId);
+                if (item) {
+                    setEditingItem(item);
+                }
+            }
+        }
         
-        // For now, just toggling the dropdown is good UX
         setIsOpen(false);
     };
 
@@ -147,7 +156,7 @@ export function NotificationCenter() {
                     right: 0,
                     width: 360,
                     maxHeight: 480,
-                    background: 'white',
+                    background: 'var(--bg-primary, white)',
                     borderRadius: 12,
                     boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
                     border: '1px solid var(--border-light)',

@@ -369,6 +369,15 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         get().calculateStats();
         get().refreshFolderCounts();
         
+        // Clean up notifications referencing trashed items
+        const currentNotifications = get().notifications;
+        const filteredNotifications = currentNotifications.filter(
+            n => !n.itemId || !allIdsToDelete.includes(n.itemId)
+        );
+        if (filteredNotifications.length !== currentNotifications.length) {
+            set({ notifications: filteredNotifications });
+        }
+
         // Notify with Undo
         get().addNotification(
             'success', 
@@ -721,17 +730,37 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         get().updateItem(id, { scheduled_at: dueAt });
     },
 
-    setItemReminder: (id, remindAt) => {
-        // Set scheduled_at and remind_before = 0 means "at that exact time"
+    setItemReminder: (id, remindAt, remindBefore = 0) => {
+        // Set scheduled_at and remind_before (minutes before to fire notification)
+        // The DB trigger will auto-compute next_trigger_at = scheduled_at - remind_before minutes
         get().updateItem(id, {
             scheduled_at: remindAt,
-            remind_before: remindAt ? 0 : null,
+            remind_before: remindAt ? remindBefore : null,
         });
     },
 
-    acknowledgeReminder: (_id, _type = 'item') => {
-        // Simplified: No longer tracking last_acknowledged_at
-        // Could add a "snoozed" field in future if needed
+    acknowledgeReminder: async (id, type = 'item') => {
+        const now = new Date().toISOString();
+        const table = type === 'task' ? 'tasks' : 'items';
+
+        // Optimistic local update
+        if (type === 'task') {
+            get().updateTask(id, { last_acknowledged_at: now } as any);
+        } else {
+            get().updateItem(id, { last_acknowledged_at: now } as any);
+        }
+
+        // Persist to DB
+        const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
+        if (isSupabaseConfigured()) {
+            const { error } = await supabase
+                .from(table)
+                .update({ last_acknowledged_at: now })
+                .eq('id', id);
+            if (error) {
+                console.error(`[DataSlice] Failed to acknowledge reminder for ${id}:`, error);
+            }
+        }
     },
 
     // Folders & Lists
