@@ -1,7 +1,10 @@
 import { startOfWeek, endOfWeek, eachDayOfInterval, format, isToday } from 'date-fns';
+import { useState } from 'react';
+import { CheckCircle2, Circle } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { CalendarEntry } from '../../hooks/useGoogleCalendar';
 import { GoogleSyncService } from '../../lib/googleSyncService';
+import { GoogleEventDetail } from './GoogleEventDetail';
 
 interface CalendarWeekViewProps {
     viewDate: Date;
@@ -12,6 +15,7 @@ interface CalendarWeekViewProps {
 
 export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEntriesForDate }: CalendarWeekViewProps) {
     const { updateItem, updateTask, openScheduler } = useAppStore();
+    const [selectedGhostEntry, setSelectedGhostEntry] = useState<CalendarEntry | null>(null);
 
     const days = mode === 'week'
         ? eachDayOfInterval({ start: startOfWeek(viewDate), end: endOfWeek(viewDate) })
@@ -22,7 +26,7 @@ export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEnt
     const handleEntryClick = (e: React.MouseEvent, entry: CalendarEntry) => {
         e.stopPropagation();
         if (entry.isGhost) {
-            alert(`Google Event: ${entry.title}`);
+            setSelectedGhostEntry(entry);
             return;
         }
         if (entry.type === 'item' || entry.type === 'task') {
@@ -107,6 +111,14 @@ export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEnt
 
     return (
         <div className="week-view">
+            {/* Google Event Detail Popup */}
+            {selectedGhostEntry && (
+                <GoogleEventDetail
+                    entry={selectedGhostEntry}
+                    onClose={() => setSelectedGhostEntry(null)}
+                />
+            )}
+
             {/* Header Row: Days */}
             <div className="week-header">
                 <div className="time-gutter-header"></div>
@@ -117,16 +129,24 @@ export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEnt
 
                         {/* All Day Events Section */}
                         <div className="all-day-section">
-                            {getEntriesForDate(day).filter(e => e.allDay).map(entry => (
+                            {getEntriesForDate(day).filter(e => e.allDay).map(entry => {
+                                const isTaskEntry = entry.type === 'task' || entry.type === 'google-task';
+                                return (
                                 <div
                                     key={entry.id}
-                                    className={`all-day-chip ${entry.isGhost ? 'ghost' : ''}`}
-                                    style={{ backgroundColor: entry.color }}
+                                    className={`all-day-chip ${entry.isGhost ? 'ghost' : ''} ${isTaskEntry ? 'task-chip' : ''} ${entry.isCompleted ? 'is-completed' : ''}`}
+                                    style={{ backgroundColor: isTaskEntry ? 'transparent' : entry.color }}
                                     onClick={(e) => handleEntryClick(e, entry)}
                                 >
-                                    <span className="chip-title">{entry.title}</span>
+                                    {isTaskEntry && (
+                                        entry.isCompleted
+                                            ? <CheckCircle2 size={12} className="task-check-icon done" />
+                                            : <Circle size={12} className="task-check-icon" style={{ color: entry.color }} />
+                                    )}
+                                    <span className={`chip-title ${entry.isCompleted ? 'line-through' : ''}`}>{entry.title}</span>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 ))}
@@ -160,22 +180,35 @@ export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEnt
                             ))}
 
                             {/* Timed Events */}
-                            {getEntriesForDate(day).filter(e => !e.allDay).map(entry => (
+                            {getEntriesForDate(day).filter(e => !e.allDay).map(entry => {
+                                const isTaskEntry = entry.type === 'task' || entry.type === 'google-task';
+                                return (
                                 <div
                                     key={entry.id}
-                                    className={`timed-event ${entry.isGhost ? 'ghost' : ''}`}
-                                    style={getEventStyle(entry)}
+                                    className={`timed-event ${entry.isGhost ? 'ghost' : ''} ${isTaskEntry ? 'task-event' : ''} ${entry.isCompleted ? 'is-completed' : ''}`}
+                                    style={isTaskEntry ? {
+                                        ...getEventStyle(entry),
+                                        backgroundColor: 'transparent',
+                                        border: `1px ${entry.isGhost ? 'dashed' : 'solid'} ${entry.color || '#10B981'}`,
+                                        color: 'var(--text-primary)'
+                                    } : getEventStyle(entry)}
                                     onClick={(e) => handleEntryClick(e, entry)}
                                     draggable={!entry.isGhost}
                                     onDragStart={(e) => handleDragStart(e, entry)}
                                     title={`${entry.title} (${format(entry.start, 'h:mm a')})`}
                                 >
                                     <div className="event-content">
-                                        <span className="event-title">{entry.title}</span>
+                                        {isTaskEntry && (
+                                            entry.isCompleted
+                                                ? <CheckCircle2 size={12} className="task-check done" />
+                                                : <Circle size={12} className="task-check" style={{ color: entry.color }} />
+                                        )}
+                                        <span className={`event-title ${entry.isCompleted ? 'line-through' : ''}`}>{entry.title}</span>
                                         <span className="event-time">{format(entry.start, 'h:mm a')}</span>
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     ))}
                 </div>
@@ -323,6 +356,30 @@ export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEnt
                 .event-content { display: flex; flex-direction: column; }
                 .event-title { font-size: 12px; font-weight: 500; line-height: 1.2; }
                 .event-time { font-size: 10px; opacity: 0.9; margin-top: 2px; }
+
+                /* Task-specific styles */
+                .all-day-chip.task-chip {
+                    background: transparent !important;
+                    border: 1px solid var(--border-light);
+                    color: var(--text-primary);
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                }
+                .task-check-icon { flex-shrink: 0; }
+                .task-check-icon.done { color: #9CA3AF; }
+                .chip-title.line-through, .event-title.line-through {
+                    text-decoration: line-through;
+                    color: var(--text-muted);
+                }
+                .is-completed { opacity: 0.5; }
+
+                .timed-event.task-event {
+                    background: white !important;
+                    box-shadow: none;
+                }
+                .task-check { flex-shrink: 0; margin-bottom: 2px; }
+                .task-check.done { color: #9CA3AF; }
             `}</style>
         </div>
     );

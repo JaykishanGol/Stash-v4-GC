@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
     X,
     Calendar,
+    CalendarDays,
     Clock,
     Folder,
     Flag,
@@ -29,6 +30,7 @@ const TYPE_ICONS = {
     file: FileText,
     image: Image,
     folder: FolderClosed,
+    event: CalendarDays,
 };
 
 const TYPE_COLORS = {
@@ -37,6 +39,7 @@ const TYPE_COLORS = {
     file: { bg: '#F5F3FF', color: '#7C3AED', border: '#C4B5FD' },
     image: { bg: '#EFF6FF', color: '#2563EB', border: '#93C5FD' },
     folder: { bg: '#FFFBEB', color: '#D97706', border: '#FCD34D' },
+    event: { bg: '#E8F0FE', color: '#1A73E8', border: '#A8C7FA' },
 };
 
 export function InfoPanel() {

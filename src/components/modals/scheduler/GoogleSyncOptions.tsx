@@ -1,13 +1,6 @@
 import { Users, Video, MapPin, Calendar as CalIcon, CheckSquare, Bell, Globe, Eye, X } from 'lucide-react';
 import type { GoogleTaskList, GoogleCalendarListEntry } from '../../../lib/googleClient';
-
-// Google Colors constant
-const GOOGLE_COLORS = [
-    { id: '1', color: '#7986cb' }, { id: '2', color: '#33b679' }, { id: '3', color: '#8e24aa' },
-    { id: '4', color: '#e67c73' }, { id: '5', color: '#f6c026' }, { id: '6', color: '#f5511d' },
-    { id: '7', color: '#039be5' }, { id: '8', color: '#616161' }, { id: '9', color: '#3f51b5' },
-    { id: '10', color: '#0b8043' }, { id: '11', color: '#d60000' }
-];
+import { GOOGLE_COLORS } from '../../../lib/calendarConstants';
 
 interface GoogleSyncOptionsProps {
     activeTab: 'event' | 'task';

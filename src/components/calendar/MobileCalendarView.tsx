@@ -8,9 +8,10 @@ import {
     isSameDay, 
     isToday
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckSquare } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckSquare, MapPin, Video, Circle, CheckCircle2 } from 'lucide-react';
 import type { CalendarEntry } from '../../hooks/useGoogleCalendar';
 import { useAppStore } from '../../store/useAppStore';
+import { GoogleEventDetail } from './GoogleEventDetail';
 
 interface MobileCalendarViewProps {
     selectedDate: Date;
@@ -20,6 +21,7 @@ interface MobileCalendarViewProps {
 
 export function MobileCalendarView({ selectedDate, onSelectDate, getEntriesForDate }: MobileCalendarViewProps) {
     const [weekStart, setWeekStart] = useState(startOfWeek(selectedDate));
+    const [selectedGhostEntry, setSelectedGhostEntry] = useState<CalendarEntry | null>(null);
     const { openScheduler } = useAppStore();
     
     // Sync week strip if selectedDate changes externally (e.g. from jump to today)
@@ -35,7 +37,10 @@ export function MobileCalendarView({ selectedDate, onSelectDate, getEntriesForDa
     });
 
     const handleEntryClick = (entry: CalendarEntry) => {
-        if (entry.isGhost) return;
+        if (entry.isGhost) {
+            setSelectedGhostEntry(entry);
+            return;
+        }
         if (entry.type === 'item' || entry.type === 'task') {
             openScheduler(entry.id);
         }
@@ -43,6 +48,14 @@ export function MobileCalendarView({ selectedDate, onSelectDate, getEntriesForDa
 
     return (
         <div className="mobile-calendar-container">
+            {/* Google Event Detail Popup */}
+            {selectedGhostEntry && (
+                <GoogleEventDetail
+                    entry={selectedGhostEntry}
+                    onClose={() => setSelectedGhostEntry(null)}
+                />
+            )}
+
             {/* 1. Week Strip Header */}
             <div className="week-strip-header">
                 <div className="week-nav-row">
@@ -92,13 +105,28 @@ export function MobileCalendarView({ selectedDate, onSelectDate, getEntriesForDa
                     </div>
                 ) : (
                     <div className="agenda-list">
-                        {entries.map(entry => (
+                        {entries.map(entry => {
+                            const isTaskEntry = entry.type === 'task' || entry.type === 'google-task';
+                            const isEventEntry = entry.type === 'google-event' || entry.sourceType === 'event';
+                            return (
                             <div 
                                 key={entry.id} 
-                                className={`agenda-card ${entry.allDay ? 'all-day' : ''}`}
-                                style={{ borderLeftColor: entry.color }}
+                                className={`agenda-card ${entry.allDay ? 'all-day' : ''} ${entry.isCompleted ? 'completed' : ''} ${isTaskEntry ? 'task-card' : ''}`}
+                                style={{ borderLeftColor: isTaskEntry ? 'transparent' : entry.color }}
                                 onClick={() => handleEntryClick(entry)}
                             >
+                                {/* Task checkbox indicator */}
+                                {isTaskEntry && (
+                                    <div className="task-check-col">
+                                        {entry.isCompleted 
+                                            ? <CheckCircle2 size={20} color="#9CA3AF" />
+                                            : <Circle size={20} color={entry.color || '#10B981'} />
+                                        }
+                                    </div>
+                                )}
+
+                                {/* Event color bar indicator */}
+                                {!isTaskEntry && (
                                 <div className="agenda-time-col">
                                     {entry.allDay ? (
                                         <span className="time-text">All Day</span>
@@ -111,21 +139,48 @@ export function MobileCalendarView({ selectedDate, onSelectDate, getEntriesForDa
                                         </>
                                     )}
                                 </div>
+                                )}
                                 
                                 <div className="agenda-info-col">
-                                    <div className="entry-title">{entry.title}</div>
+                                    <div className={`entry-title ${entry.isCompleted ? 'line-through' : ''}`}>{entry.title}</div>
+
+                                    {/* Time for tasks (shown inline) */}
+                                    {isTaskEntry && entry.allDay && (
+                                        <div className="task-due-label">Due today</div>
+                                    )}
+                                    {isTaskEntry && !entry.allDay && (
+                                        <div className="task-due-label">{format(entry.start, 'h:mm a')}</div>
+                                    )}
+
                                     <div className="entry-meta">
-                                        {entry.type === 'task' || entry.type === 'google-task' ? (
+                                        {isTaskEntry ? (
                                             <span className="meta-tag task">
                                                 <CheckSquare size={12} /> Task
                                             </span>
+                                        ) : isEventEntry ? (
+                                            <span className="meta-tag event-tag">
+                                                {entry.source === 'google' ? 'Google Calendar' : 'Event'}
+                                            </span>
                                         ) : (
-                                            <span className="meta-tag event">Event</span>
+                                            <span className="meta-tag event">
+                                                {entry.source === 'google' ? 'Google' : (entry.sourceType || 'Item')}
+                                            </span>
+                                        )}
+                                        {entry.location && (
+                                            <span className="meta-tag location">
+                                                <MapPin size={10} /> {entry.location.substring(0, 25)}
+                                            </span>
+                                        )}
+                                        {entry.meetLink && (
+                                            <span className="meta-tag meet">
+                                                <Video size={10} /> Meet
+                                            </span>
                                         )}
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
@@ -323,6 +378,44 @@ export function MobileCalendarView({ selectedDate, onSelectDate, getEntriesForDa
                     background: var(--bg-app);
                     color: var(--text-secondary);
                     font-weight: 500;
+                }
+                .meta-tag.location { color: #2563EB; }
+                .meta-tag.meet { color: #00897B; background: #E0F2F1; }
+
+                .agenda-card.completed {
+                    opacity: 0.6;
+                }
+                .agenda-card.completed .entry-title {
+                    text-decoration: line-through;
+                    color: var(--text-muted);
+                }
+                .entry-title.line-through {
+                    text-decoration: line-through;
+                    color: var(--text-muted);
+                }
+
+                /* Task card styles */
+                .agenda-card.task-card {
+                    border-left: none !important;
+                    background: var(--bg-app);
+                    box-shadow: none;
+                    border: 1px solid var(--border-light);
+                }
+                .task-check-col {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 0 4px;
+                    flex-shrink: 0;
+                }
+                .task-due-label {
+                    font-size: 0.75rem;
+                    color: var(--text-muted);
+                    margin-bottom: 4px;
+                }
+                .meta-tag.event-tag {
+                    background: #E8F0FE;
+                    color: #1A73E8;
                 }
             `}</style>
         </div>

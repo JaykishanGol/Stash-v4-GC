@@ -126,6 +126,7 @@ export function processShare(share: ShareData, userId: string): Item[] {
                 is_pinned: false,
                 is_archived: false,
                 is_completed: false,
+                is_unsynced: true,
                 created_at: now,
                 updated_at: now,
                 deleted_at: null
@@ -156,6 +157,7 @@ export function processShare(share: ShareData, userId: string): Item[] {
             is_pinned: false,
             is_archived: false,
             is_completed: false,
+            is_unsynced: true,
             created_at: now,
             updated_at: now,
             deleted_at: null
@@ -184,6 +186,7 @@ export function processShare(share: ShareData, userId: string): Item[] {
             is_pinned: false,
             is_archived: false,
             is_completed: false,
+            is_unsynced: true,
             created_at: now,
             updated_at: now,
             deleted_at: null

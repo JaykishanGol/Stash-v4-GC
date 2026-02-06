@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { AppState } from '../types';
 import {
     validateItemForSync,
+    isEventContent,
 } from '../../lib/types';
 import type {
     Item,
@@ -11,6 +12,7 @@ import type {
     SmartFolderCounts,
     TodayStats,
     UploadItem,
+    EventContent,
 } from '../../lib/types';
 import { persistentSyncQueue } from '../../lib/persistentQueue';
 import { googleSyncQueue } from '../../lib/googleSyncQueue';
@@ -200,10 +202,34 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
         // Google Sync (if scheduled)
         if (itemWithFlag.scheduled_at) {
-            googleSyncQueue.enqueue(itemWithFlag.id, 'event', itemWithFlag, {
+            const syncOptions: any = {
                 start: itemWithFlag.scheduled_at,
                 end: itemWithFlag.scheduled_at,
-            });
+            };
+
+            // Event-type items carry richer sync info
+            if (itemWithFlag.type === 'event' && isEventContent(itemWithFlag.content)) {
+                const ec = itemWithFlag.content as EventContent;
+                syncOptions.end = ec.end_time || itemWithFlag.scheduled_at;
+                syncOptions.isAllDay = ec.is_all_day;
+                syncOptions.location = ec.location;
+                syncOptions.description = ec.description;
+                if (ec.attendees?.length) syncOptions.attendees = ec.attendees;
+                if (ec.meet_link) syncOptions.addMeet = true;
+                if (ec.color_id) syncOptions.colorId = ec.color_id;
+                if (ec.visibility) syncOptions.visibility = ec.visibility;
+                if (ec.show_as) syncOptions.transparency = ec.show_as === 'free' ? 'transparent' : 'opaque';
+                if (ec.timezone) syncOptions.timezone = ec.timezone;
+                if (ec.calendar_id) syncOptions.calendarId = ec.calendar_id;
+                if (ec.notifications?.length) {
+                    syncOptions.reminders = ec.notifications.map((n: any) => ({
+                        method: n.method || 'popup',
+                        minutes: n.minutes
+                    }));
+                }
+            }
+
+            googleSyncQueue.enqueue(itemWithFlag.id, 'event', itemWithFlag, syncOptions);
         }
     },
 
@@ -222,10 +248,33 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
             // Google Sync
             if (updatedItem.scheduled_at) {
-                googleSyncQueue.enqueue(updatedItem.id, 'event', updatedItem, {
+                const syncOptions: any = {
                     start: updatedItem.scheduled_at,
                     end: updatedItem.scheduled_at,
-                });
+                };
+
+                if (updatedItem.type === 'event' && isEventContent(updatedItem.content)) {
+                    const ec = updatedItem.content as EventContent;
+                    syncOptions.end = ec.end_time || updatedItem.scheduled_at;
+                    syncOptions.isAllDay = ec.is_all_day;
+                    syncOptions.location = ec.location;
+                    syncOptions.description = ec.description;
+                    if (ec.attendees?.length) syncOptions.attendees = ec.attendees;
+                    if (ec.meet_link) syncOptions.addMeet = true;
+                    if (ec.color_id) syncOptions.colorId = ec.color_id;
+                    if (ec.visibility) syncOptions.visibility = ec.visibility;
+                    if (ec.show_as) syncOptions.transparency = ec.show_as === 'free' ? 'transparent' : 'opaque';
+                    if (ec.timezone) syncOptions.timezone = ec.timezone;
+                    if (ec.calendar_id) syncOptions.calendarId = ec.calendar_id;
+                    if (ec.notifications?.length) {
+                        syncOptions.reminders = ec.notifications.map((n: any) => ({
+                            method: n.method || 'popup',
+                            minutes: n.minutes
+                        }));
+                    }
+                }
+
+                googleSyncQueue.enqueue(updatedItem.id, 'event', updatedItem, syncOptions);
             }
         }
     },
@@ -780,11 +829,11 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             // Schedule stats (exclude items in folders to avoid noise)
             if (item.scheduled_at && !item.is_completed) {
                 const scheduledDate = new Date(item.scheduled_at);
-                if (scheduledDate < today) todayStats.overdue++;
+                if (scheduledDate < today && !item.is_completed) todayStats.overdue++;
                 else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
 
                 // Count as reminder if remind_before is set
-                if (item.remind_before !== null) {
+                if (item.remind_before !== null && item.remind_before !== undefined) {
                     if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
                     todayStats.totalReminders++;
                 }
@@ -865,6 +914,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             folders: [],
             lists: [],
             tasks: [],
+            calendarEvents: [],
             uploads: [],
             smartFolderCounts: { notes: 0, links: 0, files: 0, images: 0, folders: 0 },
             todayStats: { dueToday: 0, reminders: 0, totalReminders: 0, overdue: 0, tasks: 0 },

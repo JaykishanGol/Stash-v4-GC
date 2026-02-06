@@ -69,8 +69,10 @@ export type Database = {
           priority: string | null
           recurring_config: Json | null
           remind_at: string | null
+          remind_before: number | null
           reminder_recurring: string | null
           reminder_type: string | null
+          scheduled_at: string | null
           tags: string[] | null
           title: string
           type: string
@@ -101,8 +103,10 @@ export type Database = {
           priority?: string | null
           recurring_config?: Json | null
           remind_at?: string | null
+          remind_before?: number | null
           reminder_recurring?: string | null
           reminder_type?: string | null
+          scheduled_at?: string | null
           tags?: string[] | null
           title?: string
           type: string
@@ -133,8 +137,10 @@ export type Database = {
           priority?: string | null
           recurring_config?: Json | null
           remind_at?: string | null
+          remind_before?: number | null
           reminder_recurring?: string | null
           reminder_type?: string | null
+          scheduled_at?: string | null
           tags?: string[] | null
           title?: string
           type?: string
@@ -259,8 +265,10 @@ export type Database = {
           priority: string | null
           recurring_config: Json | null
           remind_at: string | null
+          remind_before: number | null
           reminder_recurring: string | null
           reminder_type: string | null
+          scheduled_at: string | null
           tags: string[] | null
           title: string
           updated_at: string | null
@@ -284,8 +292,10 @@ export type Database = {
           priority?: string | null
           recurring_config?: Json | null
           remind_at?: string | null
+          remind_before?: number | null
           reminder_recurring?: string | null
           reminder_type?: string | null
+          scheduled_at?: string | null
           tags?: string[] | null
           title: string
           updated_at?: string | null
@@ -309,12 +319,14 @@ export type Database = {
           priority?: string | null
           recurring_config?: Json | null
           remind_at?: string | null
+          remind_before?: number | null
           reminder_recurring?: string | null
           reminder_type?: string | null
+          scheduled_at?: string | null
           tags?: string[] | null
-          title: string
+          title?: string
           updated_at?: string | null
-          user_id: string
+          user_id?: string
         }
         Relationships: [
           {

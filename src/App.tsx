@@ -63,6 +63,48 @@ function App() {
     persistentSyncQueue.process();
   }, []);
 
+  // Listen for service worker notification action messages
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const handleSWMessage = (event: MessageEvent) => {
+      const { type, action, data } = event.data || {};
+      if (type !== 'NOTIFICATION_ACTION' || !data?.itemId) return;
+
+      const store = useAppStore.getState();
+      const id = data.itemId;
+      const itemType = data.type || 'item';
+
+      if (action === 'complete') {
+        if (itemType === 'task') {
+          store.updateTask(id, { is_completed: true });
+        } else {
+          store.updateItem(id, { is_completed: true });
+        }
+        addNotification('success', 'Completed', 'Item marked as done');
+      } else if (action === 'snooze') {
+        const newTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        if (itemType === 'task') {
+          store.updateTask(id, { scheduled_at: newTime });
+        } else {
+          store.updateItem(id, { scheduled_at: newTime });
+        }
+        addNotification('info', 'Snoozed', 'Reminder snoozed for 10 minutes');
+      } else {
+        // Default click - open the item
+        if (itemType === 'task') {
+          store.setSelectedTask(id);
+        } else {
+          const item = store.items.find(i => i.id === id);
+          if (item) store.setEditingItem(item);
+        }
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSWMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+  }, [addNotification]);
+
   useEffect(() => {
     document.body.classList.toggle('auth-modal-open', isAuthModalOpen);
     document.documentElement.classList.toggle('auth-modal-open', isAuthModalOpen);
@@ -112,6 +154,55 @@ function App() {
       });
       // Clean URL
       url.searchParams.delete('share_target');
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    // Handle notification deep-link actions (open, complete, snooze)
+    const openType = url.searchParams.get('open');
+    const openId = url.searchParams.get('id');
+    const action = url.searchParams.get('action');
+
+    if (openType && openId && user) {
+      setTimeout(() => {
+        if (openType === 'task') {
+          useAppStore.getState().setSelectedTask(openId);
+        } else {
+          const item = useAppStore.getState().items.find(i => i.id === openId);
+          if (item) useAppStore.getState().setEditingItem(item);
+        }
+      }, 500);
+      // Clean URL
+      url.searchParams.delete('open');
+      url.searchParams.delete('id');
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    if (action && openId && user) {
+      setTimeout(() => {
+        const store = useAppStore.getState();
+        if (action === 'complete') {
+          if (url.searchParams.get('type') === 'task') {
+            store.updateTask(openId, { is_completed: true });
+          } else {
+            store.updateItem(openId, { is_completed: true });
+          }
+          addNotification('success', 'Completed', 'Item marked as done');
+        } else if (action === 'snooze') {
+          const minutes = parseInt(url.searchParams.get('minutes') || '10');
+          const newTime = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+          if (url.searchParams.get('type') === 'task') {
+            store.updateTask(openId, { scheduled_at: newTime });
+          } else {
+            store.updateItem(openId, { scheduled_at: newTime });
+          }
+          addNotification('info', 'Snoozed', `Reminder snoozed for ${minutes} minutes`);
+        }
+      }, 500);
+      // Clean URL
+      url.searchParams.delete('action');
+      url.searchParams.delete('type');
+      url.searchParams.delete('id');
+      url.searchParams.delete('minutes');
       window.history.replaceState({}, '', url.toString());
     }
   }, [user, setPendingShareItems, addNotification]);

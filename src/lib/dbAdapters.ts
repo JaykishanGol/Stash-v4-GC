@@ -38,8 +38,8 @@ function parsePriority(value: string | null | undefined): PriorityLevel {
 export function adaptItemRow(row: ItemRow): Item {
     // Migration: Map old fields to new simplified schema
     // Priority: one_time_at > due_at for scheduled_at
-    const legacyScheduledAt = (row as any).one_time_at ?? row.due_at ?? (row as any).remind_at ?? null;
-    const legacyRemindBefore = (row as any).one_time_at ? 0 : null; // If had one_time_at, remind at that exact time
+    const legacyScheduledAt = row.one_time_at ?? row.due_at ?? row.remind_at ?? null;
+    const legacyRemindBefore = row.one_time_at ? 0 : null; // If had one_time_at, remind at that exact time
 
     return {
         id: row.id,
@@ -53,8 +53,8 @@ export function adaptItemRow(row: ItemRow): Item {
         tags: row.tags ?? [],
 
         // Simplified scheduler fields (with migration from legacy)
-        scheduled_at: (row as any).scheduled_at ?? legacyScheduledAt,
-        remind_before: (row as any).remind_before ?? legacyRemindBefore,
+        scheduled_at: row.scheduled_at ?? legacyScheduledAt,
+        remind_before: row.remind_before ?? legacyRemindBefore,
         recurring_config: row.recurring_config ? parseJsonContent(row.recurring_config) as RecurringConfig : null,
 
         bg_color: row.bg_color ?? '#FFFFFF',
@@ -84,8 +84,8 @@ export function adaptItemRow(row: ItemRow): Item {
  */
 export function adaptTaskRow(row: TaskRow): Task {
     // Migration: Map old fields to new simplified schema
-    const legacyScheduledAt = (row as any).one_time_at ?? row.due_at ?? (row as any).remind_at ?? null;
-    const legacyRemindBefore = (row as any).one_time_at ? 0 : null;
+    const legacyScheduledAt = row.one_time_at ?? row.due_at ?? row.remind_at ?? null;
+    const legacyRemindBefore = row.one_time_at ? 0 : null;
 
     return {
         id: row.id,
@@ -97,8 +97,8 @@ export function adaptTaskRow(row: TaskRow): Task {
         priority: parsePriority(row.priority),
 
         // Simplified scheduler fields (with migration from legacy)
-        scheduled_at: (row as any).scheduled_at ?? legacyScheduledAt,
-        remind_before: (row as any).remind_before ?? legacyRemindBefore,
+        scheduled_at: row.scheduled_at ?? legacyScheduledAt,
+        remind_before: row.remind_before ?? legacyRemindBefore,
         recurring_config: row.recurring_config ? parseJsonContent(row.recurring_config) as RecurringConfig : null,
 
         // Task-specific

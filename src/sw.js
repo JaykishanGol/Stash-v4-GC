@@ -191,16 +191,21 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body || 'Tap to view details',
-    icon: data.icon || '/vite.svg',
-    badge: '/vite.svg',
+    icon: data.icon || '/icon.png',
+    badge: data.badge || '/icon.png',
     tag: data.tag || 'stash-reminder',
-    requireInteraction: true,
+    requireInteraction: data.requireInteraction || false,
     vibrate: [200, 100, 200],
     data: data.data || {},
-    // Ensure notification shows even when app is focused
     silent: false,
-    renotify: true
+    renotify: true,
+    timestamp: data.data?.scheduledAt ? new Date(data.data.scheduledAt).getTime() : Date.now(),
   };
+
+  // Add action buttons if provided
+  if (data.actions && data.actions.length > 0) {
+    options.actions = data.actions;
+  }
 
   console.log('[SW] Showing notification with options:', options);
 
@@ -212,20 +217,45 @@ self.addEventListener('push', (event) => {
 });
 
 self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification clicked:', event.notification.tag);
+  console.log('[SW] Notification clicked:', event.notification.tag, 'action:', event.action);
   event.notification.close();
+
+  const notifData = event.notification.data || {};
+  let targetUrl = '/';
+
+  // Handle action buttons
+  if (event.action === 'complete') {
+    // Navigate to app with completion intent
+    targetUrl = `/?action=complete&type=${notifData.type || 'item'}&id=${notifData.itemId || ''}`;
+  } else if (event.action === 'snooze') {
+    // Navigate to app with snooze intent (10 min)
+    targetUrl = `/?action=snooze&type=${notifData.type || 'item'}&id=${notifData.itemId || ''}&minutes=10`;
+  } else if (event.action === 'view' || !event.action) {
+    // Default click or view action - navigate to the item
+    if (notifData.url) {
+      targetUrl = notifData.url;
+    } else if (notifData.itemId) {
+      targetUrl = `/?open=${notifData.type || 'item'}&id=${notifData.itemId}`;
+    }
+  }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If a window is already open, focus it
+      // If a window is already open, navigate and focus it
       for (const client of clientList) {
         if (client.url && 'focus' in client) {
+          client.postMessage({
+            type: 'NOTIFICATION_ACTION',
+            action: event.action || 'click',
+            data: notifData,
+            url: targetUrl
+          });
           return client.focus();
         }
       }
       // Otherwise, open a new window
       if (clients.openWindow) {
-        return clients.openWindow('/');
+        return clients.openWindow(targetUrl);
       }
     })
   );

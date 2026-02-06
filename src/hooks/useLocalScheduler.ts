@@ -4,7 +4,7 @@ import { useAppStore } from '../store/useAppStore';
 /**
  * Local Scheduler Hook (In-Page Notification Scheduler)
  * Uses Web Notifications API for scheduled reminders
- * Updated to use simplified scheduled_at / remind_before fields
+ * Provides rich, actionable notifications matching Google Calendar quality
  */
 export function useLocalScheduler() {
     const { items, tasks } = useAppStore();
@@ -16,8 +16,42 @@ export function useLocalScheduler() {
             Notification.requestPermission();
         }
 
-        const scheduleLocalNotification = (id: string, title: string, scheduledAt: string, remindBefore: number | null, type: 'item' | 'task') => {
-            // Calculate when to trigger the notification
+        const formatRelativeTime = (scheduledAt: string): string => {
+            const scheduled = new Date(scheduledAt);
+            const now = new Date();
+            const diffMs = scheduled.getTime() - now.getTime();
+            const diffMin = Math.round(diffMs / 60000);
+
+            if (diffMin <= 0) return 'now';
+            if (diffMin < 60) return `in ${diffMin} min`;
+            const hours = Math.floor(diffMin / 60);
+            const mins = diffMin % 60;
+            if (hours < 24) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
+            return `on ${scheduled.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        };
+
+        const formatTime = (dateStr: string): string => {
+            const d = new Date(dateStr);
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        };
+
+        const getPriorityEmoji = (priority: string | undefined): string => {
+            switch (priority) {
+                case 'high': return '🔴 ';
+                case 'medium': return '🟡 ';
+                case 'low': return '🔵 ';
+                default: return '';
+            }
+        };
+
+        const scheduleLocalNotification = (
+            id: string,
+            title: string,
+            scheduledAt: string,
+            remindBefore: number | null,
+            type: 'item' | 'task',
+            extra?: { priority?: string; description?: string; itemType?: string }
+        ) => {
             const scheduledTime = new Date(scheduledAt).getTime();
             const reminderOffset = remindBefore ? remindBefore * 60 * 1000 : 0;
             const triggerTime = scheduledTime - reminderOffset;
@@ -32,12 +66,36 @@ export function useLocalScheduler() {
 
                 const timerId = setTimeout(() => {
                     if (Notification.permission === 'granted') {
-                        new Notification(title, {
-                            body: `Scheduled ${type === 'task' ? 'task' : 'item'} reminder`,
+                        const priorityPrefix = getPriorityEmoji(extra?.priority);
+                        const timeStr = formatTime(scheduledAt);
+                        const relativeStr = formatRelativeTime(scheduledAt);
+
+                        // Build rich notification body
+                        const bodyParts: string[] = [];
+
+                        if (type === 'task') {
+                            bodyParts.push(`📋 Task due ${relativeStr} at ${timeStr}`);
+                        } else {
+                            const typeEmoji = extra?.itemType === 'link' ? '🔗' : extra?.itemType === 'file' ? '📎' : extra?.itemType === 'image' ? '🖼️' : '📝';
+                            bodyParts.push(`${typeEmoji} Scheduled ${relativeStr} at ${timeStr}`);
+                        }
+
+                        if (extra?.description) {
+                            bodyParts.push(extra.description.substring(0, 100));
+                        }
+
+                        if (remindBefore && remindBefore > 0) {
+                            bodyParts.push(`⏰ ${remindBefore}min early reminder`);
+                        }
+
+                        new Notification(`${priorityPrefix}${title}`, {
+                            body: bodyParts.join('\n'),
                             icon: '/icon.png',
+                            badge: '/icon.png',
                             tag: `stash-${id}`,
-                            data: { id, type }
-                        });
+                            data: { id, type },
+                            requireInteraction: extra?.priority === 'high',
+                        } as NotificationOptions);
                     }
                 }, delay);
 
@@ -48,14 +106,35 @@ export function useLocalScheduler() {
         // Scan Items - use scheduled_at and remind_before
         items.forEach(item => {
             if (item.scheduled_at && !item.is_completed && !item.deleted_at) {
-                scheduleLocalNotification(item.id, item.title, item.scheduled_at, item.remind_before, 'item');
+                scheduleLocalNotification(
+                    item.id,
+                    item.title,
+                    item.scheduled_at,
+                    item.remind_before,
+                    'item',
+                    {
+                        priority: item.priority,
+                        description: item.type === 'note' ? (item.content as any)?.text?.substring(0, 100) : undefined,
+                        itemType: item.type
+                    }
+                );
             }
         });
 
         // Scan Tasks - use scheduled_at and remind_before
         tasks.forEach(task => {
             if (task.scheduled_at && !task.is_completed && !task.deleted_at) {
-                scheduleLocalNotification(task.id, task.title, task.scheduled_at, task.remind_before, 'task');
+                scheduleLocalNotification(
+                    task.id,
+                    task.title,
+                    task.scheduled_at,
+                    task.remind_before,
+                    'task',
+                    {
+                        priority: task.priority,
+                        description: task.description || undefined
+                    }
+                );
             }
         });
 

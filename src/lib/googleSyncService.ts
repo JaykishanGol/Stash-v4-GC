@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { GoogleClient } from './googleClient';
 import { calculateNextOccurrence } from './schedulerEngine';
-import type { Item, Task } from './types';
+import type { Item, Task, CalendarEvent } from './types';
 
 interface TaskSyncOptions {
     listId?: string;
@@ -221,7 +221,123 @@ export class GoogleSyncService {
         return { shouldResync: false };
     }
 
-    // ============ HELPERS ============
+    // ============ CALENDAR EVENTS (NEW) ============
+
+    /**
+     * Syncs a CalendarEvent to Google Calendar API.
+     * Handles rrule recurrence, attendees, conferenceData, reminders.
+     */
+    static async syncCalendarEvent(event: CalendarEvent) {
+        if (!event.user_id) return;
+
+        const calendarId = event.google_calendar_id || 'primary';
+        const tz = event.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+        const eventData: any = {
+            summary: event.title || '(No title)',
+            description: event.description || '',
+            location: event.location || undefined,
+            colorId: event.color_id || undefined,
+            visibility: event.visibility !== 'default' ? event.visibility : undefined,
+            transparency: event.transparency || 'opaque',
+        };
+
+        // Time
+        if (event.is_all_day) {
+            eventData.start = { date: event.start_at.split('T')[0] };
+            eventData.end = { date: (event.end_at || event.start_at).split('T')[0] };
+        } else {
+            eventData.start = { dateTime: event.start_at, timeZone: tz };
+            eventData.end = { dateTime: event.end_at || event.start_at, timeZone: tz };
+        }
+
+        // Recurrence
+        if (event.rrule && !event.parent_event_id) {
+            eventData.recurrence = [event.rrule];
+        }
+
+        // Attendees
+        if (event.attendees?.length) {
+            eventData.attendees = event.attendees.map(a => ({
+                email: a.email,
+                displayName: a.displayName,
+                responseStatus: a.responseStatus,
+            }));
+        }
+
+        // Google Meet
+        if (event.conference_data?.meetLink) {
+            eventData.conferenceData = {
+                createRequest: {
+                    requestId: crypto.randomUUID(),
+                    conferenceSolutionKey: { type: 'hangoutsMeet' }
+                }
+            };
+        }
+
+        // Reminders
+        if (event.reminders?.length) {
+            eventData.reminders = {
+                useDefault: false,
+                overrides: event.reminders.map(r => ({ method: r.method, minutes: r.minutes })),
+            };
+        }
+
+        try {
+            if (event.google_event_id) {
+                // Update existing
+                console.log(`[Sync] Updating Google Event ${event.google_event_id}`);
+                await GoogleClient.updateEvent(calendarId, event.google_event_id, eventData);
+            } else {
+                // Create new
+                console.log(`[Sync] Creating Google Event for "${event.title}"`);
+                const gEvent = await GoogleClient.createEvent(calendarId, eventData);
+                // Store the google_event_id back via link table
+                await GoogleSyncService.createLink(event.id, event.user_id, 'calendar_event', gEvent.id, 'event', { calendar_id: calendarId });
+                
+                // Write google_event_id back to local store + DB to prevent duplicate creates on next sync
+                try {
+                    const { useAppStore } = await import('../store/useAppStore');
+                    const store = useAppStore.getState();
+                    if (store.updateEvent) {
+                        await store.updateEvent(event.id, { google_event_id: gEvent.id, google_calendar_id: calendarId }, 'all');
+                        console.log(`[Sync] Wrote google_event_id=${gEvent.id} back to event ${event.id}`);
+                    }
+                } catch (writebackErr) {
+                    console.warn('[Sync] Failed to write google_event_id back to store:', writebackErr);
+                }
+            }
+        } catch (e) {
+            console.error('[Sync] Failed to sync calendar event:', e);
+        }
+    }
+
+    /**
+     * Deletes a CalendarEvent from Google Calendar.
+     */
+    static async deleteCalendarEventFromGoogle(event: CalendarEvent) {
+        if (!event.google_event_id) {
+            // Try via link table
+            const link = await GoogleSyncService.getLink(event.id, 'event');
+            if (link) {
+                try {
+                    await GoogleClient.deleteEvent(link.calendar_id || 'primary', link.google_id);
+                } catch (e) {
+                    console.warn('[Sync] Delete via link failed:', e);
+                }
+                await GoogleSyncService.deleteLink(link.id);
+            }
+            return;
+        }
+
+        try {
+            await GoogleClient.deleteEvent(event.google_calendar_id || 'primary', event.google_event_id);
+        } catch (e) {
+            console.warn('[Sync] Delete failed:', e);
+        }
+    }
+
+    // ============ HELPERS (Title/Notes) ============
 
     static generateSyncTitle(item: Item | Task): string {
         if (!('type' in item)) return item.title; // It's a Task
@@ -232,6 +348,7 @@ export class GoogleSyncService {
             case 'folder': return `[Folder] ${item.title}`;
             case 'link': return `[Link] ${item.title}`;
             case 'image': return `[Image] ${item.title}`;
+            case 'event': return item.title; // Events sync title directly
             default: return item.title; // Notes don't need prefix
         }
     }

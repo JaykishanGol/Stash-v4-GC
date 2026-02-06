@@ -99,8 +99,49 @@ export default async (req, context) => {
             // Send notification for each due item
             for (const item of items) {
                 const isTask = 'item_ids' in item;
-                const title = isTask ? `Task Due: ${item.title}` : `Reminder: ${item.title}`;
-                const body = 'Tap to view details';
+                const scheduledDate = item.scheduled_at ? new Date(item.scheduled_at) : null;
+                const timeStr = scheduledDate
+                    ? scheduledDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+                    : '';
+                const dateStr = scheduledDate
+                    ? scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : '';
+
+                // Rich title with priority indicator
+                const priorityEmoji = item.priority === 'high' ? '🔴 ' : item.priority === 'medium' ? '🟡 ' : item.priority === 'low' ? '🔵 ' : '';
+                const title = isTask
+                    ? `${priorityEmoji}📋 Task Due: ${item.title}`
+                    : `${priorityEmoji}⏰ Reminder: ${item.title}`;
+
+                // Rich body with context
+                const bodyParts: string[] = [];
+
+                if (timeStr) {
+                    const isOverdue = scheduledDate && scheduledDate < new Date();
+                    bodyParts.push(isOverdue ? `⚠️ Was due at ${timeStr} on ${dateStr}` : `📅 ${dateStr} at ${timeStr}`);
+                }
+
+                if (item.remind_before) {
+                    bodyParts.push(`🔔 ${item.remind_before}min early reminder`);
+                }
+
+                // Add description preview if available
+                if (isTask && item.description) {
+                    bodyParts.push(item.description.substring(0, 80));
+                } else if (!isTask && item.content) {
+                    const text = typeof item.content === 'object' && item.content.text
+                        ? item.content.text.substring(0, 80)
+                        : '';
+                    if (text) bodyParts.push(text);
+                }
+
+                // Item type indicator
+                if (!isTask && item.type) {
+                    const typeLabels: Record<string, string> = { note: '📝 Note', link: '🔗 Link', file: '📎 File', image: '🖼️ Image', folder: '📂 Folder' };
+                    bodyParts.push(typeLabels[item.type] || item.type);
+                }
+
+                const body = bodyParts.join(' • ') || 'Tap to view details';
                 
                 // 1. Insert into Persistent Database History
                 // We do this BEFORE push to ensure history exists even if push fails
@@ -108,12 +149,15 @@ export default async (req, context) => {
                     .from('notifications')
                     .insert({
                         user_id: userId,
-                        type: 'info',
+                        type: item.priority === 'high' ? 'warning' : 'info',
                         title: title,
                         message: body,
                         data: { 
                             itemId: item.id, 
-                            type: isTask ? 'task' : 'item' 
+                            type: isTask ? 'task' : 'item',
+                            priority: item.priority || 'none',
+                            scheduledAt: item.scheduled_at,
+                            itemType: item.type || null
                         },
                         is_read: false
                     });
@@ -126,9 +170,26 @@ export default async (req, context) => {
                 const payload = JSON.stringify({
                     title: title,
                     body: body,
-                    icon: '/vite.svg',
+                    icon: '/icon.png',
+                    badge: '/icon.png',
                     tag: item.id,
-                    data: { itemId: item.id, type: isTask ? 'task' : 'item' }
+                    data: {
+                        itemId: item.id,
+                        type: isTask ? 'task' : 'item',
+                        priority: item.priority || 'none',
+                        scheduledAt: item.scheduled_at,
+                        url: `/?open=${isTask ? 'task' : 'item'}&id=${item.id}`
+                    },
+                    actions: isTask
+                        ? [
+                            { action: 'complete', title: '✅ Done' },
+                            { action: 'snooze', title: '⏰ Snooze 10min' }
+                        ]
+                        : [
+                            { action: 'view', title: '👁️ View' },
+                            { action: 'snooze', title: '⏰ Snooze 10min' }
+                        ],
+                    requireInteraction: item.priority === 'high'
                 });
 
                 // Send to all user's subscriptions

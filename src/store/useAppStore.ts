@@ -6,6 +6,7 @@ import { createDataSlice } from './slices/dataSlice';
 import { createSelectionSlice } from './slices/selectionSlice';
 import { createTaskSlice } from './slices/taskSlice';
 import { createClipboardUndoSlice } from './slices/clipboardUndoSlice';
+import { createEventSlice } from './slices/eventSlice';
 import type { Item } from '../lib/types';
 import { persistentSyncQueue } from '../lib/persistentQueue';
 import { tombstoneManager } from '../lib/tombstones';
@@ -27,6 +28,7 @@ export const useAppStore = create<AppState>()(
             ...createSelectionSlice(set, get, api),
             ...createTaskSlice(set, get, api),
             ...createClipboardUndoSlice(set, get, api),
+            ...createEventSlice(set, get, api),
 
             // ============ COMPUTED IMPLEMENTATIONS ============
 
@@ -133,6 +135,9 @@ export const useAppStore = create<AppState>()(
 
                     console.log(`[Store] Loaded ${allItems.length} items (${count} total, hasMore: ${hasMore})`);
                     get().calculateStats();
+
+                    // Load calendar events
+                    get().loadEvents();
                 } catch (error) {
                     console.error('Error loading user data:', error);
                     set({ isLoading: false });
@@ -170,6 +175,7 @@ export const useAppStore = create<AppState>()(
                 folders: state.folders,
                 lists: state.lists,
                 tasks: state.tasks,
+                calendarEvents: state.calendarEvents,
                 // Do not persist:
                 // user, isLoading, isAuthModalOpen (security/transient)
                 // editingItem, clipboard (transient)

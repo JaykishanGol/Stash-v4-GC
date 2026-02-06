@@ -22,13 +22,14 @@ import type { DataSlice } from './slices/dataSlice';
 import type { SelectionSlice } from './slices/selectionSlice';
 import type { TaskSlice } from './slices/taskSlice';
 import type { ClipboardUndoSlice } from './slices/clipboardUndoSlice';
+import type { EventSlice } from './slices/eventSlice';
 import type { Item, Task } from '../lib/types';
 
 /**
  * Combined application state type.
  * Use this when a slice needs typed access to the full store.
  */
-export type AppState = AuthSlice & UISlice & DataSlice & SelectionSlice & TaskSlice & ClipboardUndoSlice & {
+export type AppState = AuthSlice & UISlice & DataSlice & SelectionSlice & TaskSlice & ClipboardUndoSlice & EventSlice & {
     // Computed (Selectors)
     getFilteredItems: (overrideListId?: string | null) => Item[];
     getFilteredTasks: () => Task[];

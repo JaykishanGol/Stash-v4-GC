@@ -63,6 +63,7 @@ export function ShareIntentModal() {
             };
 
             // --- SUPABASE STORAGE UPLOAD ---
+            // Always upload files with blob URLs (both triage and quick-save)
             if ((finalItem.type === 'file' || finalItem.type === 'image') && finalItem.file_meta?.path.startsWith('blob:')) {
                 // Check if user is demo - can't upload without auth
                 if (finalItem.user_id === 'demo') {

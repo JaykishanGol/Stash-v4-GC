@@ -55,6 +55,9 @@ export interface UISlice {
     // Scheduler Modal State
     isSchedulerOpen: boolean;
     schedulerItemId: string | null;
+    schedulerEventId: string | null;
+    /** When editing a recurring instance: the original occurrence start */
+    schedulerOriginalStart: string | null;
 
     // Context Menu State
     contextMenu: {
@@ -110,6 +113,7 @@ export interface UISlice {
 
     // Scheduler Actions
     openScheduler: (itemId: string) => void;
+    openEventScheduler: (eventId: string, originalStart?: string) => void;
     closeScheduler: () => void;
 
     // Context Menu Actions
@@ -162,6 +166,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
 
     isSchedulerOpen: false,
     schedulerItemId: null,
+    schedulerEventId: null,
+    schedulerOriginalStart: null,
 
     contextMenu: { isOpen: false, x: 0, y: 0, itemId: null, type: null },
     infoPanelItem: null,
@@ -213,8 +219,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     setEditingList: (list) => set({ editingList: list }),
     setDeletingList: (list) => set({ deletingList: list }),
 
-    openScheduler: (itemId) => set({ isSchedulerOpen: true, schedulerItemId: itemId }),
-    closeScheduler: () => set({ isSchedulerOpen: false, schedulerItemId: null }),
+    openScheduler: (itemId) => set({ isSchedulerOpen: true, schedulerItemId: itemId, schedulerEventId: null, schedulerOriginalStart: null }),
+    openEventScheduler: (eventId, originalStart) => set({ isSchedulerOpen: true, schedulerEventId: eventId, schedulerItemId: null, schedulerOriginalStart: originalStart || null }),
+    closeScheduler: () => set({ isSchedulerOpen: false, schedulerItemId: null, schedulerEventId: null, schedulerOriginalStart: null }),
 
     openContextMenu: (x, y, itemId, type = 'item') => set({ contextMenu: { isOpen: true, x, y, itemId, type } }),
     closeContextMenu: () => set({ contextMenu: { isOpen: false, x: 0, y: 0, itemId: null, type: null } }),

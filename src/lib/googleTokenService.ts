@@ -79,8 +79,21 @@ export async function refreshGoogleAccessToken(refreshToken: string): Promise<st
             body: JSON.stringify({ refresh_token: refreshToken }),
         });
 
+        // Handle 404 (Netlify function not available in local dev)
+        if (response.status === 404) {
+            console.warn('[GoogleTokenService] Refresh endpoint not found (local dev?). Skipping.');
+            return null;
+        }
+
         if (!response.ok) {
-            const errorData = await response.json();
+            // Safely parse error body — may be HTML or empty
+            let errorData: any = {};
+            try {
+                const text = await response.text();
+                if (text) errorData = JSON.parse(text);
+            } catch {
+                // Body wasn't JSON — ignore
+            }
 
             // If token is revoked, clear it from DB
             if (errorData.requiresReauth) {
@@ -89,10 +102,17 @@ export async function refreshGoogleAccessToken(refreshToken: string): Promise<st
                 return null;
             }
 
-            throw new Error(errorData.error || 'Token refresh failed');
+            throw new Error(errorData.error || `Token refresh failed (${response.status})`);
         }
 
-        const data = await response.json();
+        // Safely parse success body
+        const text = await response.text();
+        if (!text) {
+            console.warn('[GoogleTokenService] Empty response body from refresh endpoint');
+            return null;
+        }
+
+        const data = JSON.parse(text);
         console.log('[GoogleTokenService] Token refreshed, expires in:', data.expires_in, 'seconds');
 
         return data.access_token;

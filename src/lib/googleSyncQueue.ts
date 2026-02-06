@@ -121,6 +121,19 @@ export class GoogleSyncQueue {
         const item = this.queue.get(id);
         if (!item || this.processing.has(id)) return;
 
+        // Check Google connection before attempting sync
+        try {
+            const { hasStoredGoogleConnection } = await import('./googleTokenService');
+            const connected = await hasStoredGoogleConnection();
+            if (!connected) {
+                console.debug('[GoogleSyncQueue] No Google connection — skipping sync for', id);
+                return;
+            }
+        } catch {
+            // If we can't check, skip silently
+            return;
+        }
+
         this.processing.add(id);
         this.debounceTimers.delete(id);
 
@@ -180,16 +193,24 @@ export class GoogleSyncQueue {
      * Update error status in DB so UI can show a red icon
      */
     private async updateErrorStatus(localId: string, error: string | null) {
-        // We update the link table to reflect status
-        const { error: dbError } = await supabase
-            .from('google_resource_links')
-            .update({ 
-                error: error,
-                last_synced_at: error ? undefined : new Date().toISOString()
-            })
-            .eq('local_id', localId);
+        try {
+            // We update the link table to reflect status
+            const { error: dbError } = await supabase
+                .from('google_resource_links')
+                .update({ 
+                    error: error,
+                    last_synced_at: error ? undefined : new Date().toISOString()
+                })
+                .eq('local_id', localId);
 
-        if (dbError) console.error('[GoogleSyncQueue] Failed to update status:', dbError);
+            // 406 = table doesn't exist yet, silently ignore
+            if (dbError && dbError.code !== 'PGRST204' && !dbError.message?.includes('406')) {
+                console.warn('[GoogleSyncQueue] Failed to update status:', dbError.message);
+            }
+        } catch (e) {
+            // Table may not exist — non-critical, swallow error
+            console.debug('[GoogleSyncQueue] google_resource_links not available:', e);
+        }
     }
 }
 

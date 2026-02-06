@@ -14,7 +14,9 @@ export type SyncActionType =
     | 'upsert-task'
     | 'delete-task'
     | 'upsert-list'
-    | 'delete-list';
+    | 'delete-list'
+    | 'upsert-event'
+    | 'delete-event';
 
 interface SyncOperation {
     id: string; // The specific Item/Task/List ID
@@ -305,11 +307,14 @@ class PersistentQueue {
             if (type === 'upsert-list') {
                 ALLOWED_KEYS = ['id', 'user_id', 'name', 'color', 'order', 'items', 'created_at', 'item_count'];
             } else if (type === 'upsert-task') {
-                // Task fields (simplified scheduler) - REMOVED remind_before
-                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'item_ids', 'item_completion', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'tags'];
+                // Task fields (simplified scheduler)
+                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'item_ids', 'item_completion', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'tags'];
             } else if (type === 'upsert-item') {
-                // Item fields (simplified scheduler) - REMOVED remind_before
-                ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'recurring_config', 'remind_at', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
+                // Item fields (simplified scheduler)
+                ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
+            } else if (type === 'upsert-event') {
+                // CalendarEvent fields
+                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'google_event_id', 'google_calendar_id', 'created_at', 'updated_at', 'deleted_at'];
             }
 
             // Filter entries
@@ -369,6 +374,16 @@ class PersistentQueue {
             }
             case 'delete-list': {
                 const { error } = await supabase.from('lists').delete().eq('id', id);
+                if (error) throw error;
+                break;
+            }
+            case 'upsert-event': {
+                const { error } = await supabase.from('events').upsert(payload, { onConflict: 'id' });
+                if (error) throw error;
+                break;
+            }
+            case 'delete-event': {
+                const { error } = await supabase.from('events').delete().eq('id', id);
                 if (error) throw error;
                 break;
             }

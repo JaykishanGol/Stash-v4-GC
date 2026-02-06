@@ -3,8 +3,8 @@
 
 // ============ CORE TYPES ============
 
-// 5 Item Types: notes, links, images, files, folders
-export type ItemType = 'note' | 'link' | 'image' | 'file' | 'folder';
+// 6 Item Types: notes, links, images, files, folders, events
+export type ItemType = 'note' | 'link' | 'image' | 'file' | 'folder' | 'event';
 export type PriorityLevel = 'none' | 'low' | 'medium' | 'high';
 export type ViewMode = 'grid' | 'list';
 
@@ -37,6 +37,21 @@ export interface FolderContent {
   description?: string;
 }
 
+export interface EventContent {
+  description?: string;
+  location?: string;
+  end_time?: string;         // ISO string for end date/time
+  is_all_day?: boolean;
+  attendees?: string[];      // Email addresses
+  meet_link?: string;
+  calendar_id?: string;      // Google Calendar ID
+  color_id?: string;         // Google Calendar color ID
+  visibility?: 'default' | 'public' | 'private';
+  show_as?: 'busy' | 'free';
+  timezone?: string;
+  notifications?: { method: 'popup' | 'email'; minutes: number }[];
+}
+
 export interface FileMeta {
   size: number;
   mime: string;
@@ -55,7 +70,7 @@ export interface Item {
   folder_id: string | null;
   type: ItemType;
   title: string;
-  content: NoteContent | LinkContent | FolderContent | Record<string, unknown>;
+  content: NoteContent | LinkContent | FolderContent | EventContent | Record<string, unknown>;
   file_meta: FileMeta | null;
   priority: PriorityLevel;
   tags: string[];
@@ -113,6 +128,71 @@ export interface RecurringConfig {
 }
 
 export type ReminderType = 'none' | 'one_time' | 'recurring';
+
+// ============ CALENDAR EVENT (RFC 5545 Series + Exception) ============
+// This is the Google Calendar clone data model.
+// A "Series Master" has an rrule and generates virtual instances.
+// An "Exception" points to its master via parent_event_id.
+
+export type RecurrenceEditMode = 'this' | 'following' | 'all';
+
+export interface EventAttendee {
+  email: string;
+  responseStatus?: 'needsAction' | 'declined' | 'tentative' | 'accepted';
+  displayName?: string;
+}
+
+export interface EventReminder {
+  method: 'popup' | 'email';
+  minutes: number;
+}
+
+export interface EventConferenceData {
+  meetLink?: string;
+  entryPoints?: { entryPointType: string; uri: string; label?: string }[];
+}
+
+export interface CalendarEvent {
+  id: string;
+  user_id: string;
+
+  // Core
+  title: string;
+  description: string;
+  start_at: string;        // ISO timestamptz — start of FIRST occurrence (or single event)
+  end_at: string;           // ISO timestamptz — end time
+  is_all_day: boolean;
+
+  // Recurrence (RFC 5545)
+  rrule: string | null;     // e.g. "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
+
+  // Exception Logic
+  parent_event_id: string | null;       // Points to master if this is a modified instance
+  recurring_event_id: string | null;    // Original occurrence date (ISO) — used to hide the generated instance
+  is_deleted_instance: boolean;         // True = this exception is a cancellation
+
+  // Details
+  location: string;
+  color_id: string;
+  visibility: 'default' | 'public' | 'private';
+  transparency: 'opaque' | 'transparent';
+  timezone: string;
+
+  // Rich data
+  attendees: EventAttendee[];
+  conference_data: EventConferenceData | null;
+  reminders: EventReminder[];
+
+  // Google Sync
+  google_event_id: string | null;
+  google_calendar_id: string;
+
+  // Metadata
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  is_unsynced?: boolean;
+}
 
 // ============ TASK INTERFACE ============
 // Tasks are containers that can group multiple items
@@ -268,8 +348,17 @@ export function isFileMeta(meta: unknown): meta is FileMeta {
 /**
  * Check if a value is a valid ItemType
  */
+/**
+ * Type guard to check if content is EventContent
+ */
+export function isEventContent(content: unknown): content is EventContent {
+  if (!content || typeof content !== 'object') return false;
+  // EventContent is flexible - just check it's an object
+  return true;
+}
+
 export function isValidItemType(type: unknown): type is ItemType {
-  return ['note', 'link', 'image', 'file', 'folder'].includes(type as string);
+  return ['note', 'link', 'image', 'file', 'folder', 'event'].includes(type as string);
 }
 
 /**
@@ -417,7 +506,7 @@ export function createDefaultItem(
     folder_id: null,
     type,
     title: '',
-    content: type === 'note' ? { text: '' } : type === 'link' ? { url: '' } : {},
+    content: type === 'note' ? { text: '' } : type === 'link' ? { url: '' } : type === 'event' ? { description: '', is_all_day: false } : {},
     file_meta: null,
     priority: 'none',
     tags: [],

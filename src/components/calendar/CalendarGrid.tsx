@@ -1,7 +1,10 @@
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isSameDay, isToday } from 'date-fns';
+import { useState } from 'react';
+import { CheckCircle2, Circle } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { CalendarEntry } from '../../hooks/useGoogleCalendar';
 import { GoogleSyncService } from '../../lib/googleSyncService';
+import { GoogleEventDetail } from './GoogleEventDetail';
 
 interface CalendarGridProps {
     viewDate: Date;
@@ -12,6 +15,7 @@ interface CalendarGridProps {
 
 export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesForDate }: CalendarGridProps) {
     const { updateItem, updateTask, openScheduler } = useAppStore();
+    const [selectedGhostEntry, setSelectedGhostEntry] = useState<CalendarEntry | null>(null);
 
     // Generate calendar days
     const monthStart = startOfMonth(viewDate);
@@ -57,7 +61,7 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
     const handleEntryClick = (e: React.MouseEvent, entry: CalendarEntry) => {
         e.stopPropagation();
         if (entry.isGhost) {
-            alert(`Google Event: ${entry.title}`);
+            setSelectedGhostEntry(entry);
             return;
         }
         if (entry.type === 'item' || entry.type === 'task') {
@@ -67,6 +71,14 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
 
     return (
         <div className="calendar-grid-container" style={{ '--week-count': weekCount } as React.CSSProperties}>
+            {/* Google Event Detail Popup */}
+            {selectedGhostEntry && (
+                <GoogleEventDetail
+                    entry={selectedGhostEntry}
+                    onClose={() => setSelectedGhostEntry(null)}
+                />
+            )}
+
             {/* Weekday Headers */}
             <div className="calendar-header-row">
                 {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(day => (
@@ -99,10 +111,12 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
                             </div>
 
                             <div className="day-content">
-                                {visibleEntries.map(entry => (
+                                {visibleEntries.map(entry => {
+                                    const isTaskEntry = entry.type === 'task' || entry.type === 'google-task';
+                                    return (
                                     <div
                                         key={entry.id}
-                                        className={`event-chip ${entry.allDay ? 'all-day' : 'timed'} ${entry.isGhost ? 'ghost' : ''}`}
+                                        className={`event-chip ${isTaskEntry ? 'task-chip' : entry.allDay ? 'all-day' : 'timed'} ${entry.isGhost ? 'ghost' : ''} ${entry.isCompleted ? 'is-completed' : ''}`}
                                         style={{ '--event-color': entry.color || '#3B82F6' } as React.CSSProperties}
                                         onClick={(e) => handleEntryClick(e, entry)}
                                         draggable={!entry.isGhost}
@@ -112,11 +126,20 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
                                         }}
                                         title={entry.title}
                                     >
-                                        {entry.allDay ? (
-                                            // All Day: Solid Block
+                                        {isTaskEntry ? (
+                                            // Task: Checkbox + title (Google Calendar style)
+                                            <>
+                                                {entry.isCompleted 
+                                                    ? <CheckCircle2 size={12} className="task-check-icon done" />
+                                                    : <Circle size={12} className="task-check-icon" style={{ color: entry.color }} />
+                                                }
+                                                <span className={`event-title ${entry.isCompleted ? 'line-through' : ''}`}>{entry.title}</span>
+                                            </>
+                                        ) : entry.allDay ? (
+                                            // All Day Event: Solid Block
                                             <span className="event-title">{entry.title}</span>
                                         ) : (
-                                            // Timed: Dot + Text
+                                            // Timed Event: Dot + Time + Text
                                             <>
                                                 <span className="event-dot" />
                                                 <span className="event-time">{format(entry.start, 'h:mm a')}</span>
@@ -124,8 +147,8 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
                                             </>
                                         )}
                                     </div>
-                                ))}
-                                {hiddenCount > 0 && (
+                                    );
+                                })}n                                {hiddenCount > 0 && (
                                     <div className="more-events">+{hiddenCount} more</div>
                                 )}
                             </div>
@@ -278,6 +301,29 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
                 .event-chip.ghost {
                     opacity: 0.6;
                     border: 1px dashed var(--event-color);
+                }
+
+                /* Task Chips - Google Calendar style */
+                .event-chip.task-chip {
+                    background: transparent;
+                    color: var(--text-primary);
+                }
+                .event-chip.task-chip:hover {
+                    background: rgba(0,0,0,0.04);
+                }
+                .task-check-icon {
+                    flex-shrink: 0;
+                    color: var(--event-color);
+                }
+                .task-check-icon.done {
+                    color: #9CA3AF;
+                }
+                .event-chip.is-completed {
+                    opacity: 0.5;
+                }
+                .event-title.line-through {
+                    text-decoration: line-through;
+                    color: var(--text-muted);
                 }
 
                 .more-events {
