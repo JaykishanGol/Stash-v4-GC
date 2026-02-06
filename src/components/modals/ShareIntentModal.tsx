@@ -100,7 +100,7 @@ export function ShareIntentModal() {
                         { type: rawBlob.mime }
                     );
 
-                    const { url, error } = await uploadFile(
+                    const { path: storagePath, url, error } = await uploadFile(
                         file,
                         currentUserId,
                         finalItem.type === 'image' ? 'image' : 'file',
@@ -113,9 +113,10 @@ export function ShareIntentModal() {
 
                     if (error) throw error;
 
-                    // Update with remote URL (also replace preview to avoid stale blob: URL)
+                    // IMPORTANT: file_meta.path must be the RELATIVE storage path
+                    // (not full URL) so SecureImage can generate signed URLs
                     if (finalItem.file_meta) {
-                        finalItem.file_meta.path = url;
+                        finalItem.file_meta.path = storagePath;
                     }
                     finalItem.content = { ...finalItem.content, url, preview: url };
 
