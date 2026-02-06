@@ -6,6 +6,10 @@ import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 import { clientsClaim } from 'workbox-core'
 import { SHARE_DB_NAME, SHARE_STORE_NAME, SHARE_DB_VERSION } from './lib/shareDbConfig'
 
+// SW Version for debugging
+const SW_VERSION = '4.1.0';
+console.log(`[SW] Stash Service Worker v${SW_VERSION} loading`);
+
 // Immediately claim all clients
 self.skipWaiting()
 clientsClaim()
@@ -146,6 +150,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   if (event.request.method === 'POST' && url.pathname === '/share-target') {
+    console.log(`[SW v${SW_VERSION}] Share target POST intercepted`);
     event.respondWith(
       (async () => {
         try {
@@ -155,6 +160,8 @@ self.addEventListener('fetch', (event) => {
           const urlStr = formData.get('url') || '';
           const mediaFiles = formData.getAll('media');
 
+          console.log('[SW] Share data:', { title, text: text?.toString()?.substring(0, 50), url: urlStr, fileCount: mediaFiles?.length || 0 });
+
           const shareData = {
             title,
             text,
@@ -163,26 +170,35 @@ self.addEventListener('fetch', (event) => {
             timestamp: Date.now()
           };
 
-          // Handle Files
+          // Handle Files — process each individually with error isolation
           if (mediaFiles && mediaFiles.length > 0) {
-            shareData.files = await Promise.all(mediaFiles.map(async (file) => {
-              if (file && file.size > 0) {
-                return {
-                  name: file.name,
-                  type: file.type,
-                  buffer: await file.arrayBuffer()
-                };
+            const processedFiles = [];
+            for (const file of mediaFiles) {
+              try {
+                if (file && typeof file === 'object' && 'arrayBuffer' in file && file.size > 0) {
+                  const buffer = await file.arrayBuffer();
+                  processedFiles.push({
+                    name: file.name || 'shared-file',
+                    type: file.type || 'application/octet-stream',
+                    buffer
+                  });
+                  console.log(`[SW] Processed file: ${file.name} (${file.size} bytes, ${file.type})`);
+                }
+              } catch (fileErr) {
+                console.error('[SW] Failed to process individual file:', file?.name, fileErr);
               }
-              return null;
-            }));
-            shareData.files = shareData.files.filter(f => f !== null);
+            }
+            shareData.files = processedFiles;
           }
 
           // Save to IDB
+          console.log('[SW] Storing share data in IDB...');
           await storeShare(shareData);
+          console.log('[SW] Share data stored successfully');
 
           // Best-effort: notify any existing app windows via postMessage
-          await notifyClients();
+          const notified = await notifyClients();
+          console.log('[SW] Client notification result:', notified);
           
           // ALWAYS redirect with ?share_target=true — this is the reliable fallback.
           // On Android, the POST tears down the existing page, so postMessage
@@ -190,7 +206,7 @@ self.addEventListener('fetch', (event) => {
           return Response.redirect('/?share_target=true', 303);
         } catch (err) {
           console.error('[SW] Share target error:', err);
-          return Response.redirect('/?error=share_failed', 303);
+          return Response.redirect('/?error=share_failed&detail=' + encodeURIComponent(String(err)), 303);
         }
       })()
     );

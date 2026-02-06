@@ -113,11 +113,11 @@ export function ShareIntentModal() {
 
                     if (error) throw error;
 
-                    // Update with remote URL
+                    // Update with remote URL (also replace preview to avoid stale blob: URL)
                     if (finalItem.file_meta) {
                         finalItem.file_meta.path = url;
                     }
-                    finalItem.content = { ...finalItem.content, url };
+                    finalItem.content = { ...finalItem.content, url, preview: url };
 
                     // Revoke preview blob URL if we created one
                     const previewUrl = (item.content as any)?.preview;

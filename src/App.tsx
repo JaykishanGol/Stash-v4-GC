@@ -65,19 +65,32 @@ function App() {
     persistentSyncQueue.process();
   }, []);
 
-  // Shared function to process incoming shares from IDB
-  const handleIncomingShare = async () => {
+  // Shared function to process incoming shares from IDB (with retry for IDB race)
+  const handleIncomingShare = async (retriesLeft = 3) => {
     try {
+      console.log('[Share] Reading pending shares from IDB...');
       const shares = await getPendingShares();
-      if (shares.length === 0) return;
       
+      if (shares.length === 0) {
+        if (retriesLeft > 0) {
+          // IDB write may not be visible yet — retry after a delay
+          console.log(`[Share] IDB empty, retrying in 500ms (${retriesLeft} retries left)`);
+          await new Promise(r => setTimeout(r, 500));
+          return handleIncomingShare(retriesLeft - 1);
+        }
+        console.warn('[Share] No shares found in IDB after all retries');
+        addNotification('warning', 'Share Not Found', 'No shared content found. Please try sharing again.');
+        return;
+      }
+      
+      console.log(`[Share] Found ${shares.length} share(s) in IDB`);
       const share = shares[0];
       await clearPendingShares();
 
       const currentUser = useAppStore.getState().user;
       const newItems = processShare(share, currentUser?.id || 'demo');
       if (newItems && newItems.length > 0) {
-        console.log('[Share] Processed into items:', newItems.length);
+        console.log('[Share] Processed into items:', newItems.length, newItems.map(i => ({ type: i.type, hasBlob: !!(i as ShareItem)._rawBlob })));
         setPendingShareItems(newItems as ShareItem[]);
       } else {
         addNotification('error', 'Import Failed', 'Could not process shared content');
@@ -167,11 +180,32 @@ function App() {
     if (isLoading) return;
 
     const url = new URL(window.location.href);
+
+    // Handle share_target error from SW
+    if (url.searchParams.get('error') === 'share_failed') {
+      const detail = url.searchParams.get('detail') || 'Unknown error';
+      console.error('[Share] SW reported share_failed:', detail);
+      addNotification('error', 'Share Failed', 'Could not capture shared content. Please try again.');
+      url.searchParams.delete('error');
+      url.searchParams.delete('detail');
+      window.history.replaceState({}, '', url.toString());
+      return;
+    }
+
+    // Handle /share-target pathname (SW didn't intercept — e.g. first load after install)
+    if (url.pathname === '/share-target') {
+      console.warn('[Share] Direct /share-target access — SW did not intercept');
+      addNotification('warning', 'Not Ready', 'Share target not ready yet. Please open the app once, then try sharing again.');
+      window.history.replaceState({}, '', '/');
+      return;
+    }
+
     if (url.searchParams.has('share_target')) {
       console.log('[Share] Detected via URL param (cold start)');
       handleIncomingShare();
       // Clean URL immediately
       url.searchParams.delete('share_target');
+      url.searchParams.delete('error');
       window.history.replaceState({}, '', url.toString());
     }
 
