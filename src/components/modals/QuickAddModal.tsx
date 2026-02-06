@@ -382,7 +382,7 @@ export function QuickAddModal() {
 
                         {/* Mobile Save Button */}
                         <button className="mobile-only icon-btn save-btn" onClick={handleSubmit} style={{ color: 'var(--accent)', fontWeight: 'bold' }} aria-label="Save">
-                            <Check size={24} />
+                            <Check size={28} />
                         </button>
                     </div>
 

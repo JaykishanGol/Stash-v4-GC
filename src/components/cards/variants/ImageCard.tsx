@@ -39,7 +39,7 @@ export const ImageCard = memo(function ImageCard({ item, isSelected, isCut, onCl
             aria-label={`Image: ${cleanTitle}${isSelected ? ', selected' : ''}`}
             aria-selected={isSelected}
             className={`card card-image ${isSelected ? 'selected' : ''} ${isCut ? 'cut' : ''}`}
-            style={{ backgroundColor: item.bg_color !== '#FFFFFF' ? item.bg_color : undefined, ...gridStyles }}
+            style={{ backgroundColor: item.bg_color !== '#FFFFFF' ? item.bg_color : undefined, padding: 0, overflow: 'hidden', ...gridStyles }}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
@@ -49,18 +49,19 @@ export const ImageCard = memo(function ImageCard({ item, isSelected, isCut, onCl
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
+            {/* Image fills the card with aspect-ratio */}
             <div
                 className="card-image-preview"
                 style={{
-                    height: variant === 'grid' ? 100 : 120,
-                    flex: variant === 'grid' ? 1 : undefined,
-                    background: 'rgba(255, 255, 255, 0.4)',
-                    borderRadius: 8,
+                    width: '100%',
+                    aspectRatio: variant === 'grid' ? '4/3' : '16/9',
+                    background: 'rgba(0, 0, 0, 0.04)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    marginBottom: 12,
                     overflow: 'hidden',
+                    position: 'relative',
+                    flexShrink: 0,
                 }}
             >
                 {imagePath ? (
@@ -71,11 +72,10 @@ export const ImageCard = memo(function ImageCard({ item, isSelected, isCut, onCl
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
-                            borderRadius: 8,
                         }}
                     />
                 ) : (
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                         <circle cx="8.5" cy="8.5" r="1.5" />
                         <polyline points="21 15 16 10 5 21" />
@@ -83,18 +83,21 @@ export const ImageCard = memo(function ImageCard({ item, isSelected, isCut, onCl
                 )}
             </div>
 
-            <h3 className="card-title" title={cleanTitle}>{cleanTitle}</h3>
+            {/* Compact info footer */}
+            <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <h3 className="card-title" title={cleanTitle} style={{ fontSize: '0.875rem', margin: 0 }}>{cleanTitle}</h3>
 
-            <TagsDisplay tags={item.tags} />
-            <DateTimeIndicator item={item} />
+                <TagsDisplay tags={item.tags} />
+                <DateTimeIndicator item={item} />
 
-            <div className="card-meta" style={{ marginTop: 'auto' }}>
-                <span className="type-indicator image" title="Image" />
-                {fileSize && (
-                    <span style={{ fontSize: '0.75rem', color: '#6B7280', marginLeft: 'auto' }}>
-                        {fileSize}
-                    </span>
-                )}
+                <div className="card-meta" style={{ marginTop: 2, padding: 0, border: 'none' }}>
+                    <span className="type-indicator image" title="Image" />
+                    {fileSize && (
+                        <span style={{ fontSize: '0.7rem', color: '#9CA3AF', marginLeft: 'auto' }}>
+                            {fileSize}
+                        </span>
+                    )}
+                </div>
             </div>
         </div>
     );

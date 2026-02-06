@@ -129,6 +129,9 @@ function App() {
 
   // Handle Share Target
   useEffect(() => {
+    // Don't process shares until auth has finished loading
+    if (isLoading) return;
+
     const url = new URL(window.location.href);
     if (url.searchParams.has('share_target')) {
       console.log('Share target detected');
@@ -205,7 +208,7 @@ function App() {
       url.searchParams.delete('minutes');
       window.history.replaceState({}, '', url.toString());
     }
-  }, [user, setPendingShareItems, addNotification]);
+  }, [user, isLoading, setPendingShareItems, addNotification]);
 
   // Auto-close sidebar on mobile
   useEffect(() => {

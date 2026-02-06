@@ -5,6 +5,7 @@ import { supabase, STORAGE_BUCKET } from '../../lib/supabase'; // Import bucket 
 import type { Item, PriorityLevel, CardColor } from '../../lib/types';
 import { CARD_COLORS } from '../../lib/types';
 import { SchedulerContent } from './SchedulerModal';
+import { persistentSyncQueue } from '../../lib/persistentQueue';
 
 export function ShareIntentModal() {
     const {
@@ -13,7 +14,8 @@ export function ShareIntentModal() {
         addItem,
         folders,
         lists,
-        addNotification
+        addNotification,
+        user
     } = useAppStore();
 
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -47,8 +49,12 @@ export function ShareIntentModal() {
         let failCount = 0;
 
         for (const item of pendingShareItems) {
+            // Override user_id with current auth state to fix race condition
+            // where items were created before auth resolved
+            const currentUserId = user?.id || item.user_id;
             const finalItem: Item = {
                 ...item,
+                user_id: currentUserId,
                 folder_id: withTriage ? selectedFolderId : null,
                 priority: withTriage ? selectedPriority : 'none',
                 bg_color: withTriage ? CARD_COLORS[selectedColor] : CARD_COLORS.default,
@@ -144,6 +150,9 @@ export function ShareIntentModal() {
             addNotification('warning', 'Partial Save', `${successCount} saved, ${failCount} failed`);
         }
 
+        // Trigger immediate sync to push items to Supabase
+        persistentSyncQueue.process();
+
         setPendingShareItems([]);
         setIsSaving(false);
     };
@@ -202,7 +211,7 @@ export function ShareIntentModal() {
     const getScheduleText = () => {
         if (scheduleUpdates.scheduled_at) return new Date(scheduleUpdates.scheduled_at).toLocaleDateString();
         if (scheduleUpdates.recurring_config) return 'Recurring';
-        if (scheduleUpdates.remind_before !== null) return 'Reminder Set';
+        if (scheduleUpdates.remind_before != null) return 'Reminder Set';
         return 'Schedule';
     };
 
@@ -283,7 +292,7 @@ export function ShareIntentModal() {
                         <div className="triage-row">
                             <label><Calendar size={14} /> Schedule</label>
                             <button
-                                className={`triage-btn ${scheduleUpdates.scheduled_at || scheduleUpdates.remind_before !== null ? 'active' : ''}`}
+                                className={`triage-btn ${scheduleUpdates.scheduled_at || scheduleUpdates.remind_before != null ? 'active' : ''}`}
                                 onClick={() => setShowScheduler(true)}
                             >
                                 <Calendar size={16} />

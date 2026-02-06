@@ -22,8 +22,7 @@ export async function restoreVersion(version: ItemVersion): Promise<void> {
         .update({
             title: version.title,
             content: version.content,
-            updated_at: new Date().toISOString(),
-            is_unsynced: true // Trigger sync
+            updated_at: new Date().toISOString()
         })
         .eq('id', version.item_id);
 

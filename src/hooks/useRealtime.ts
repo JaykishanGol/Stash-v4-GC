@@ -14,11 +14,14 @@ type ListRow = Tables<'lists'>;
 const MAX_RETRIES = 10;
 /** Base delay for exponential backoff (ms) */
 const BASE_DELAY = 1000;
+/** Minimum interval between data re-fetches (ms) */
+const REFETCH_THROTTLE = 30_000; // 30 seconds
 
 export function useRealtimeSubscription() {
     const user = useAppStore((s) => s.user);
     const retryCount = useRef(0);
     const channelRef = useRef<RealtimeChannel | null>(null);
+    const lastFetchRef = useRef<number>(Date.now());
 
     useEffect(() => {
         if (!user || user.id === 'demo') return;
@@ -163,16 +166,45 @@ export function useRealtimeSubscription() {
 
         // Also reconnect when coming back online
         const handleOnline = () => {
-            console.log('[Realtime] Network online -- reconnecting');
+            console.log('[Realtime] Network online -- reconnecting & re-fetching');
             retryCount.current = 0;
             subscribe();
+            // Also re-fetch data to catch up on missed events while offline
+            const now = Date.now();
+            if (now - lastFetchRef.current > REFETCH_THROTTLE) {
+                lastFetchRef.current = now;
+                useAppStore.getState().loadUserData();
+            }
         };
         window.addEventListener('online', handleOnline);
+
+        // Re-fetch data when the tab becomes visible again
+        // Realtime WebSocket may have silently disconnected while backgrounded
+        const handleVisibilityChange = () => {
+            if (document.visibilityState !== 'visible') return;
+            const now = Date.now();
+            if (now - lastFetchRef.current > REFETCH_THROTTLE) {
+                console.log('[Realtime] Tab visible -- re-fetching data');
+                lastFetchRef.current = now;
+                useAppStore.getState().loadUserData();
+                // Also ensure the Realtime channel is still healthy
+                if (channelRef.current) {
+                    const state = channelRef.current.state;
+                    if (state !== 'joined' && state !== 'joining') {
+                        console.log('[Realtime] Channel stale on focus, reconnecting');
+                        retryCount.current = 0;
+                        subscribe();
+                    }
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         subscribe();
 
         return () => {
             window.removeEventListener('online', handleOnline);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             if (channelRef.current) {
                 supabase.removeChannel(channelRef.current);
                 channelRef.current = null;

@@ -44,17 +44,24 @@ export const FileCard = memo(function FileCard({ item, isSelected, isCut, onClic
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
-            <h3 className="card-title" title={item.title || 'Untitled File'}>
-                {item.title || 'Untitled File'}
-            </h3>
-
-            <div className="file-card-content" style={{ flex: variant === 'grid' ? 1 : undefined, justifyContent: 'center' }}>
+            {/* Compact horizontal layout: icon + info side by side */}
+            <div className="file-card-content" style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                flex: variant === 'grid' ? 1 : undefined,
+            }}>
                 <FileTypeIcon extension={extension} />
-                <div className="file-info">
-                    <p className="file-meta" style={{ fontSize: '0.75rem', color: '#6B7280' }}>
-                        {extension.toUpperCase() || 'FILE'}
-                    </p>
-                    <p className="file-meta" style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>{fileSize}</p>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 className="card-title" title={item.title || 'Untitled File'} style={{ margin: 0, fontSize: '0.9375rem' }}>
+                        {item.title || 'Untitled File'}
+                    </h3>
+                    <div className="file-info" style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                        <p className="file-meta" style={{ fontSize: '0.7rem', color: '#6B7280', margin: 0 }}>
+                            {extension.toUpperCase() || 'FILE'}
+                        </p>
+                        <p className="file-meta" style={{ fontSize: '0.7rem', color: '#9CA3AF', margin: 0 }}>{fileSize}</p>
+                    </div>
                 </div>
             </div>
 

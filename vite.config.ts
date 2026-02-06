@@ -22,7 +22,7 @@ export default defineConfig({
         theme_color: '#FAF5F0',
         background_color: '#FAF5F0',
         display: 'standalone',
-        orientation: 'portrait',
+        orientation: 'any',
         share_target: {
           action: '/share-target',
           method: 'POST',

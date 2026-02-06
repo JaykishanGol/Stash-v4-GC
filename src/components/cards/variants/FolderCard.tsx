@@ -36,38 +36,39 @@ export const FolderCard = memo(function FolderCard({ item, isSelected, isCut, on
             <PinIndicator isPinned={item.is_pinned} />
             <SyncStatusIndicator isUnsynced={item.is_unsynced} />
 
+            {/* Compact: inline icon + title + count */}
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 12,
-                marginBottom: 12,
+                gap: 10,
                 flex: variant === 'grid' ? 1 : undefined,
             }}>
                 <div
                     className="folder-icon-animated"
                     style={{
-                        width: 48,
-                        height: 48,
+                        width: 36,
+                        height: 36,
                         background: '#FEF3C7',
-                        borderRadius: 12,
+                        borderRadius: 10,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        border: '2px solid #FCD34D',
+                        border: '1.5px solid #FCD34D',
+                        flexShrink: 0,
                     }}
                 >
-                    <FolderOpen size={24} style={{ color: '#D97706' }} />
+                    <FolderOpen size={18} style={{ color: '#D97706' }} />
                 </div>
-                <div>
-                    <h3 className="card-title" style={{ marginBottom: 2 }}>{item.title}</h3>
-                    <span style={{ fontSize: '0.75rem', color: '#92400E' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 className="card-title" style={{ marginBottom: 0, fontSize: '0.9375rem' }}>{item.title}</h3>
+                    <span style={{ fontSize: '0.7rem', color: '#92400E' }}>
                         {dynamicItemCount} item{dynamicItemCount !== 1 ? 's' : ''}
                     </span>
                 </div>
             </div>
 
             {content.description && (
-                <p className="card-content" style={{ marginBottom: 0 }}>{content.description}</p>
+                <p className="card-content" style={{ marginBottom: 0, fontSize: '0.8125rem', color: '#6B7280' }}>{content.description}</p>
             )}
 
             <div className="card-meta" style={{ marginTop: 'auto' }}>

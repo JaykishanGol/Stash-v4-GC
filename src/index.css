@@ -4474,6 +4474,8 @@ button[style*="background: var(--accent)"]:hover::after {
         flex-direction: column;
         border-radius: 0 !important;
         padding-bottom: 0 !important;
+        min-height: 0;
+        overflow: hidden;
         /* Reset */
     }
 
@@ -4501,6 +4503,16 @@ button[style*="background: var(--accent)"]:hover::after {
         border: none;
         color: var(--text-primary);
         cursor: pointer;
+    }
+
+    /* Enlarge save button for better tap target */
+    .icon-btn.save-btn {
+        width: 48px;
+        height: 48px;
+        background: var(--accent);
+        border-radius: 50%;
+        color: #fff !important;
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
     }
 
     /* Type Selector (New Horizontal Bar) */
@@ -4538,6 +4550,8 @@ button[style*="background: var(--accent)"]:hover::after {
     .content-body {
         padding: 0 20px !important;
         flex: 1;
+        min-height: 0;
+        overflow-y: auto;
     }
 
     .note-title-input input.title-input {
@@ -4557,6 +4571,11 @@ button[style*="background: var(--accent)"]:hover::after {
         background: transparent !important;
         padding: 0 !important;
         font-size: 1.1rem !important;
+    }
+
+    /* Allow checklist to grow fully on mobile */
+    .checklist-items-wrapper {
+        max-height: none !important;
     }
 
     /* Options Panel (Bottom Area) */
@@ -4626,7 +4645,7 @@ button[style*="background: var(--accent)"]:hover::after {
 
     /* Add bottom padding to content to avoid footer overlap */
     .modal-content-area {
-        padding-bottom: 90px !important;
+        padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important;
     }
 
     .modal-hint {
