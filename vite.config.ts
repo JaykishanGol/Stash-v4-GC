@@ -23,6 +23,8 @@ export default defineConfig({
         background_color: '#FAF5F0',
         display: 'standalone',
         orientation: 'any',
+        start_url: '/',
+        scope: '/',
         share_target: {
           action: '/share-target',
           method: 'POST',

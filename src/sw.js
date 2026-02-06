@@ -116,10 +116,11 @@ async function storeShare(data) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(SHARE_STORE_NAME, 'readwrite');
     const store = tx.objectStore(SHARE_STORE_NAME);
-    const request = store.add(data);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-    tx.oncomplete = () => db.close(); // Clean up DB connection
+    store.add(data);
+    // Resolve on tx.oncomplete (not request.onsuccess) to ensure write is fully committed
+    // before the main thread tries to read from IDB
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
 
@@ -180,16 +181,12 @@ self.addEventListener('fetch', (event) => {
           // Save to IDB
           await storeShare(shareData);
 
-          // Try to notify existing app window (fast path — no reload)
-          const notified = await notifyClients();
+          // Best-effort: notify any existing app windows via postMessage
+          await notifyClients();
           
-          if (notified) {
-            // App is open, we sent SHARE_RECEIVED message. 
-            // Redirect to root (the app handles it via message listener).
-            return Response.redirect('/', 303);
-          }
-          
-          // No existing window — redirect with param so app picks up on load
+          // ALWAYS redirect with ?share_target=true — this is the reliable fallback.
+          // On Android, the POST tears down the existing page, so postMessage
+          // goes to a dying client. The URL param ensures the fresh page picks up the share.
           return Response.redirect('/?share_target=true', 303);
         } catch (err) {
           console.error('[SW] Share target error:', err);
