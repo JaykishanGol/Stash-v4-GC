@@ -69,6 +69,7 @@ export function CalendarFAB({ selectedDate }: CalendarFABProps) {
             attendees: [],
             conference_data: null,
             reminders: [{ method: 'popup', minutes: 10 }],
+            attachments: [],
             google_event_id: null,
             google_calendar_id: 'primary',
             deleted_at: null,

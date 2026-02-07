@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { CheckCircle2, Circle } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { CalendarEntry } from '../../hooks/useGoogleCalendar';
-import { GoogleSyncService } from '../../lib/googleSyncService';
 import { GoogleEventDetail } from './GoogleEventDetail';
 
 interface CalendarGridProps {
@@ -39,21 +38,8 @@ export function CalendarGrid({ viewDate, selectedDate, onSelectDate, getEntriesF
 
             if (itemType === 'task') {
                 updateTask(itemId, updates);
-                const { tasks } = useAppStore.getState();
-                const foundTask = tasks.find(t => t.id === itemId);
-                if (foundTask) {
-                    GoogleSyncService.syncToGoogleTask({ ...foundTask, ...updates }, { dueDate: isoDate });
-                }
             } else {
                 updateItem(itemId, updates);
-                const { items } = useAppStore.getState();
-                const foundItem = items.find(i => i.id === itemId);
-                if (foundItem) {
-                    GoogleSyncService.syncToGoogleEvent({ ...foundItem, ...updates }, {
-                        start: isoDate,
-                        end: isoDate,
-                    });
-                }
             }
         }
     };

@@ -10,15 +10,26 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 // Anon client for auth verification
 const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
 
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
+};
+
 export default async (req, context) => {
     const method = req.method;
+
+    // Handle CORS preflight
+    if (method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     // Get auth token from header
     const authHeader = req.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
     }
 
@@ -30,7 +41,7 @@ export default async (req, context) => {
         console.error('[subscribe-push] Auth error:', authError);
         return new Response(JSON.stringify({ error: 'Invalid token' }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
     }
 
@@ -43,7 +54,7 @@ export default async (req, context) => {
             if (!endpoint || !keys?.p256dh || !keys?.auth) {
                 return new Response(JSON.stringify({ error: 'Invalid subscription data' }), {
                     status: 400,
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json', ...corsHeaders }
                 });
             }
 
@@ -61,14 +72,14 @@ export default async (req, context) => {
                 console.error('[subscribe-push] Error saving subscription:', error);
                 return new Response(JSON.stringify({ error: 'Failed to save subscription' }), {
                     status: 500,
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json', ...corsHeaders }
                 });
             }
 
             console.log(`[subscribe-push] Subscription saved for user ${user.id}`);
             return new Response(JSON.stringify({ success: true }), {
                 status: 200,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json', ...corsHeaders }
             });
 
         } else if (method === 'DELETE') {
@@ -79,7 +90,7 @@ export default async (req, context) => {
             if (!endpoint) {
                 return new Response(JSON.stringify({ error: 'Endpoint required' }), {
                     status: 400,
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json', ...corsHeaders }
                 });
             }
 
@@ -93,20 +104,20 @@ export default async (req, context) => {
                 console.error('[subscribe-push] Error deleting subscription:', error);
                 return new Response(JSON.stringify({ error: 'Failed to delete subscription' }), {
                     status: 500,
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json', ...corsHeaders }
                 });
             }
 
             console.log(`[subscribe-push] Subscription removed for user ${user.id}`);
             return new Response(JSON.stringify({ success: true }), {
                 status: 200,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json', ...corsHeaders }
             });
 
         } else {
             return new Response(JSON.stringify({ error: 'Method not allowed' }), {
                 status: 405,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json', ...corsHeaders }
             });
         }
 
@@ -114,7 +125,7 @@ export default async (req, context) => {
         console.error('[subscribe-push] Error:', error);
         return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
         });
     }
 };

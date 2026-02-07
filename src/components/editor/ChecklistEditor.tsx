@@ -16,6 +16,7 @@ interface ChecklistEditorProps {
 
 export function ChecklistEditor({ items, onChange, autoFocus }: ChecklistEditorProps) {
     const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+    const hasCompleted = items.some(item => item.checked);
 
     // Initialize with one empty item if empty
     useEffect(() => {
@@ -80,6 +81,10 @@ export function ChecklistEditor({ items, onChange, autoFocus }: ChecklistEditorP
         onChange(items.filter(i => i.id !== id));
     };
 
+    const clearCompleted = () => {
+        onChange(items.filter(item => !item.checked));
+    };
+
     // Sort: unchecked first, then checked
     // actually, Keep usually keeps them in order until you refresh, or moves checked to bottom.
     // Let's keep manual order for editing stability.
@@ -120,6 +125,16 @@ export function ChecklistEditor({ items, onChange, autoFocus }: ChecklistEditorP
                     </button>
                 </div>
             ))}
+
+            {hasCompleted && (
+                <button
+                    type="button"
+                    className="checklist-clear-completed"
+                    onClick={clearCompleted}
+                >
+                    Clear completed
+                </button>
+            )}
             
             <div 
                 className="checklist-add-row" 
@@ -219,6 +234,22 @@ export function ChecklistEditor({ items, onChange, autoFocus }: ChecklistEditorP
                 }
                 .checklist-add-row:hover {
                     color: var(--text-secondary);
+                }
+                .checklist-clear-completed {
+                    align-self: flex-start;
+                    margin-left: 34px;
+                    margin-top: 2px;
+                    margin-bottom: 4px;
+                    background: none;
+                    border: none;
+                    color: var(--text-secondary);
+                    cursor: pointer;
+                    font-size: 0.82rem;
+                    padding: 2px 0;
+                }
+                .checklist-clear-completed:hover {
+                    color: var(--highlight);
+                    text-decoration: underline;
                 }
             `}</style>
         </div>

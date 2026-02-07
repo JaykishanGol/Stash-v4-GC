@@ -135,6 +135,72 @@
     border-radius: 4px;
 }
 
+/* ===== Resize Handles (Google Calendar style) ===== */
+.fullcalendar-google-wrapper .fc-timegrid-event .fc-event-resizer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 8px;
+    cursor: s-resize;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+}
+.fullcalendar-google-wrapper .fc-timegrid-event .fc-event-resizer::after {
+    content: '';
+    display: block;
+    width: 24px;
+    height: 3px;
+    background: rgba(255,255,255,0.7);
+    border-radius: 1.5px;
+    margin: 3px auto 0;
+}
+.fullcalendar-google-wrapper .fc-timegrid-event:hover .fc-event-resizer {
+    opacity: 1;
+}
+
+/* ===== Google Ghost Events (read-only) ===== */
+.fc-ghost-event {
+    pointer-events: auto;
+    cursor: pointer;
+}
+.fullcalendar-google-wrapper .fc-event.fc-ghost-event,
+.fullcalendar-google-wrapper .fc-event[class*="ghost"] {
+    background-image: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 3px,
+        rgba(255,255,255,0.1) 3px,
+        rgba(255,255,255,0.1) 6px
+    );
+}
+
+/* ===== List/Agenda View (Schedule) ===== */
+.fullcalendar-google-wrapper .fc-list {
+    border: none;
+}
+.fullcalendar-google-wrapper .fc-list-day-cushion {
+    background: var(--bg-app, #f8f9fa);
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #3c4043);
+}
+.fullcalendar-google-wrapper .fc-list-event td {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-light, #dadce0);
+}
+.fullcalendar-google-wrapper .fc-list-event-dot {
+    border-radius: 50%;
+}
+.fullcalendar-google-wrapper .fc-list-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary, #70757a);
+    font-size: 14px;
+}
+
 /* Dark mode support */
 @media (prefers-color-scheme: dark) {
     .fullcalendar-google-wrapper {

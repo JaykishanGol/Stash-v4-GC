@@ -111,11 +111,11 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     return (
         <div className="modal-overlay active" onClick={onClose} style={{ zIndex: 9999 }}>
-            <div ref={trapRef} className="modal" style={{ width: 'min(420px, 90vw)', maxWidth: 420, zIndex: 9999, position: 'relative' }} onClick={e => e.stopPropagation()}>
+            <div ref={trapRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title" style={{ width: 'min(420px, 90vw)', maxWidth: 420, zIndex: 9999, position: 'relative' }} onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="modal-header">
                     <div>
-                        <h2 className="modal-title">
+                        <h2 className="modal-title" id="auth-modal-title">
                             {mode === 'login' ? 'Welcome Back' : 'Create Account'}
                         </h2>
                         <p style={{
@@ -193,7 +193,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                     <form onSubmit={handleSubmit}>
                         {/* Email */}
                         <div style={{ marginBottom: 16 }}>
-                            <label style={{
+                            <label htmlFor="auth-email" style={{
                                 display: 'block',
                                 fontSize: '0.75rem',
                                 fontWeight: 600,
@@ -216,6 +216,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                                     }}
                                 />
                                 <input
+                                    id="auth-email"
                                     type="email"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
@@ -235,7 +236,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
                         {/* Password */}
                         <div style={{ marginBottom: 20 }}>
-                            <label style={{
+                            <label htmlFor="auth-password" style={{
                                 display: 'block',
                                 fontSize: '0.75rem',
                                 fontWeight: 600,
@@ -247,6 +248,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                                 Password
                             </label>
                             <input
+                                id="auth-password"
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}

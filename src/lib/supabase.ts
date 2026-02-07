@@ -1,17 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase configuration
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
+// Supabase configuration - empty strings disable the client in demo mode
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 // Create Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true,
-    },
-});
+export const supabase = createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-key',
+    {
+        auth: {
+            autoRefreshToken: true,
+            persistSession: true,
+            detectSessionInUrl: true,
+        },
+    }
+);
 
 // Storage bucket name
 export const STORAGE_BUCKET = 'stash_vault';
@@ -19,8 +23,10 @@ export const STORAGE_BUCKET = 'stash_vault';
 // Check if Supabase is configured
 export function isSupabaseConfigured(): boolean {
     return (
-        supabaseUrl !== 'https://your-project.supabase.co' &&
-        supabaseAnonKey !== 'your-anon-key'
+        supabaseUrl !== '' &&
+        supabaseAnonKey !== '' &&
+        !supabaseUrl.includes('placeholder') &&
+        !supabaseUrl.includes('your-project')
     );
 }
 

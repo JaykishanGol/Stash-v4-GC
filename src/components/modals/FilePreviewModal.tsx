@@ -3,6 +3,7 @@ import { X, Download, ExternalLink, FileText, Image as ImageIcon, Film, Music, F
 import { useAppStore } from '../../store/useAppStore';
 import { supabase, STORAGE_BUCKET, uploadFile } from '../../lib/supabase';
 import { generateId } from '../../lib/utils';
+import DOMPurify from 'dompurify';
 import type { FileMeta } from '../../lib/types';
 
 // Helper to determine accurate file type
@@ -157,7 +158,7 @@ export function FilePreviewModal() {
                         const response = await fetch(resolvedUrl);
                         const arrayBuffer = await response.arrayBuffer();
                         const result = await mammoth.convertToHtml({ arrayBuffer });
-                        setDocxHtml(result.value);
+                        setDocxHtml(DOMPurify.sanitize(result.value));
                     } catch (err) {
                         console.error('Failed to render DOCX:', err);
                         setDocxHtml('<p style="color:#ef4444">Failed to load document. Try downloading instead.</p>');

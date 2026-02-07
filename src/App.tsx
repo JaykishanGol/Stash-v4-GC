@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, useCallback, lazy, Suspense } from 'react';
 import { Router } from 'wouter';
 import { Layout } from './components/layout/Layout';
 import { QuickAddModal } from './components/modals/QuickAddModal';
@@ -19,6 +19,7 @@ import { useAppStore } from './store/useAppStore';
 import { useMobileBackHandler } from './hooks/useMobileBackHandler';
 import { useRealtimeSubscription } from './hooks/useRealtime';
 import { persistentSyncQueue } from './lib/persistentQueue';
+import { googleSyncEngine } from './lib/googleSyncEngine';
 import { getPendingShares, processShare, clearPendingShares, type ShareItem } from './lib/shareHandler';
 import { isSupabaseConfigured } from './lib/supabase';
 import './index.css';
@@ -52,6 +53,7 @@ function App() {
     setPendingShareItems,
     addNotification // Import for debug toast
   } = useAppStore();
+  const userId = user?.id;
 
   useSmartPaste();
   useKeyboardShortcuts();
@@ -65,8 +67,19 @@ function App() {
     persistentSyncQueue.process();
   }, []);
 
+  // Start/stop unified Google two-way sync engine with auth lifecycle.
+  useEffect(() => {
+    if (userId && userId !== 'demo') {
+      googleSyncEngine.start(userId);
+      googleSyncEngine.scheduleSync('auth-change', 300);
+    } else {
+      googleSyncEngine.stop();
+    }
+  }, [userId]);
+
   // Shared function to process incoming shares from IDB (with retry for IDB race)
-  const handleIncomingShare = async (retriesLeft = 3) => {
+  // Uses getState() to avoid stale closures  
+  const handleIncomingShare = useCallback(async (retriesLeft = 3) => {
     try {
       console.log('[Share] Reading pending shares from IDB...');
       const shares = await getPendingShares();
@@ -79,7 +92,7 @@ function App() {
           return handleIncomingShare(retriesLeft - 1);
         }
         console.warn('[Share] No shares found in IDB after all retries');
-        addNotification('warning', 'Share Not Found', 'No shared content found. Please try sharing again.');
+        useAppStore.getState().addNotification('warning', 'Share Not Found', 'No shared content found. Please try sharing again.');
         return;
       }
       
@@ -91,15 +104,15 @@ function App() {
       const newItems = processShare(share, currentUser?.id || 'demo');
       if (newItems && newItems.length > 0) {
         console.log('[Share] Processed into items:', newItems.length, newItems.map(i => ({ type: i.type, hasBlob: !!(i as ShareItem)._rawBlob })));
-        setPendingShareItems(newItems as ShareItem[]);
+        useAppStore.getState().setPendingShareItems(newItems as ShareItem[]);
       } else {
-        addNotification('error', 'Import Failed', 'Could not process shared content');
+        useAppStore.getState().addNotification('error', 'Import Failed', 'Could not process shared content');
       }
     } catch (err) {
       console.error('[Share] Failed to process:', err);
-      addNotification('error', 'Import Failed', 'Error reading shared data');
+      useAppStore.getState().addNotification('error', 'Import Failed', 'Error reading shared data');
     }
-  };
+  }, []);
 
   // Listen for service worker messages (notifications + share target)
   useEffect(() => {
@@ -150,7 +163,7 @@ function App() {
 
     navigator.serviceWorker.addEventListener('message', handleSWMessage);
     return () => navigator.serviceWorker.removeEventListener('message', handleSWMessage);
-  }, [addNotification]);
+  }, [addNotification, handleIncomingShare]);
 
   useEffect(() => {
     document.body.classList.toggle('auth-modal-open', isAuthModalOpen);
@@ -344,4 +357,3 @@ function App() {
 }
 
 export default App;
-

@@ -12,6 +12,12 @@ import type { AppState } from '../types';
 import type { CalendarEvent, RecurrenceEditMode } from '../../lib/types';
 import { addUntilToRRule } from '../../lib/eventExpander';
 
+function requestGoogleEventSync() {
+    void import('../../lib/googleSyncEngine').then(({ googleSyncEngine }) => {
+        googleSyncEngine.scheduleSync('event-change', 500);
+    });
+}
+
 export interface EventSlice {
     // State
     calendarEvents: CalendarEvent[];
@@ -50,7 +56,9 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
         try {
             const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
             if (!isSupabaseConfigured()) {
+                // In demo mode, keep any locally-created events intact
                 set({ isEventsLoading: false });
+                console.log('[EventSlice] Demo mode — preserving', get().calendarEvents.length, 'local events');
                 return;
             }
 
@@ -58,7 +66,6 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 .from('events')
                 .select('*')
                 .eq('user_id', user.id)
-                .is('deleted_at', null)
                 .order('start_at', { ascending: true });
 
             if (error) {
@@ -85,6 +92,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
         } catch (err) {
             console.error('[EventSlice] Load failed:', err);
             set({ isEventsLoading: false });
+            get().addNotification?.('error', 'Calendar Error', 'Could not load calendar events.');
         }
     },
 
@@ -105,6 +113,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
         }));
 
         get().syncEventToDb(newEvent);
+        requestGoogleEventSync();
         return newEvent;
     },
 
@@ -137,6 +146,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 }));
 
                 get().syncEventToDb(updated);
+                requestGoogleEventSync();
                 break;
             }
 
@@ -166,6 +176,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                         ),
                     }));
                     get().syncEventToDb(updated);
+                    requestGoogleEventSync();
                     return;
                 }
 
@@ -188,6 +199,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 }));
 
                 get().syncEventToDb(exception);
+                requestGoogleEventSync();
                 break;
             }
 
@@ -218,6 +230,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                         ),
                     }));
                     get().syncEventToDb(updated);
+                    requestGoogleEventSync();
                     return;
                 }
 
@@ -264,6 +277,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
 
                 get().syncEventToDb(updatedMaster);
                 get().syncEventToDb(newMaster);
+                requestGoogleEventSync();
                 break;
             }
         }
@@ -277,16 +291,28 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
 
         switch (mode) {
             case 'all': {
-                // Delete the master (cascade will remove exceptions via DB FK)
                 const masterId = target.parent_event_id || target.id;
+                const now = new Date().toISOString();
 
                 set(state => ({
-                    calendarEvents: state.calendarEvents.filter(e =>
-                        e.id !== masterId && e.parent_event_id !== masterId
-                    ),
+                    calendarEvents: state.calendarEvents.map(e => {
+                        if (e.id === masterId || e.parent_event_id === masterId) {
+                            return {
+                                ...e,
+                                deleted_at: now,
+                                updated_at: now,
+                                is_unsynced: true,
+                            };
+                        }
+                        return e;
+                    }),
                 }));
 
-                get().deleteEventFromDb(masterId);
+                const affected = get().calendarEvents.filter(e => e.id === masterId || e.parent_event_id === masterId);
+                affected.forEach(ev => {
+                    get().syncEventToDb(ev);
+                });
+                requestGoogleEventSync();
                 break;
             }
 
@@ -309,6 +335,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                         ),
                     }));
                     get().syncEventToDb(updated);
+                    requestGoogleEventSync();
                     return;
                 }
 
@@ -334,6 +361,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 }));
 
                 get().syncEventToDb(deletedException);
+                requestGoogleEventSync();
                 break;
             }
 
@@ -376,6 +404,7 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 }));
 
                 get().syncEventToDb(updatedMaster);
+                requestGoogleEventSync();
                 break;
             }
         }
@@ -407,20 +436,22 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 attendees: event.attendees,
                 conference_data: event.conference_data,
                 reminders: event.reminders,
+                attachments: event.attachments,
                 google_event_id: event.google_event_id,
                 google_calendar_id: event.google_calendar_id,
+                google_etag: event.google_etag ?? null,
+                remote_updated_at: event.remote_updated_at ?? null,
+                is_unsynced: event.is_unsynced ?? true,
+                created_at: event.created_at,
                 updated_at: event.updated_at,
                 deleted_at: event.deleted_at,
             };
 
             persistentSyncQueue.add('upsert-event', event.id, payload);
 
-            // Optimistically clear unsynced flag
-            set(state => ({
-                calendarEvents: state.calendarEvents.map(e =>
-                    e.id === event.id ? { ...e, is_unsynced: false } : e
-                ),
-            }));
+            // NOTE: Do NOT clear is_unsynced here.
+            // The flag should only be cleared after sync succeeds
+            // (via loadEvents() or Realtime reconciliation).
         } catch (err) {
             console.error('[EventSlice] Sync failed:', err);
         }

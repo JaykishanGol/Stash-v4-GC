@@ -8,7 +8,12 @@ import type { StateCreator } from 'zustand';
 import type { AppState } from '../types';
 import type { Task } from '../../lib/types';
 import { persistentSyncQueue } from '../../lib/persistentQueue';
-import { googleSyncQueue } from '../../lib/googleSyncQueue';
+
+function requestGoogleTaskSync() {
+    void import('../../lib/googleSyncEngine').then(({ googleSyncEngine }) => {
+        googleSyncEngine.scheduleSync('task-change', 500);
+    });
+}
 
 export interface TaskSlice {
     // Task State (owned by DataSlice, referenced here for actions)
@@ -40,6 +45,11 @@ export const createTaskSlice: StateCreator<AppState, [], [], TaskSlice> = (set, 
             updated_at: now,
             deleted_at: null,
             list_id: taskData.list_id || null,
+            parent_task_id: taskData.parent_task_id || null,
+            sort_position: taskData.sort_position || null,
+            google_etag: null,
+            remote_updated_at: null,
+            is_unsynced: true,
             // CRITICAL: Initialize arrays to prevent drag-drop failures
             ...taskData,
             item_ids: taskData.item_ids || [],
@@ -48,35 +58,37 @@ export const createTaskSlice: StateCreator<AppState, [], [], TaskSlice> = (set, 
         set(state => ({ tasks: [newTask, ...state.tasks] }));
         get().syncTaskToDb(newTask);
         get().calculateStats();
-
-        // Google Sync
-        googleSyncQueue.enqueue(newTask.id, 'task', newTask, {
-            dueDate: newTask.scheduled_at || undefined,
-            notes: newTask.description || undefined
-        });
+        requestGoogleTaskSync();
     },
 
     updateTask: (id, updates) => {
+        const now = new Date().toISOString();
         set(state => ({
-            tasks: state.tasks.map(t => t.id === id ? { ...t, ...updates, updated_at: new Date().toISOString() } : t)
+            tasks: state.tasks.map(t => t.id === id ? { ...t, ...updates, is_unsynced: true, updated_at: now } : t)
         }));
         const task = get().tasks.find(t => t.id === id);
         if (task) {
             get().syncTaskToDb(task);
-
-            // Google Sync
-            googleSyncQueue.enqueue(task.id, 'task', task, {
-                dueDate: task.scheduled_at || undefined,
-                notes: task.description || undefined
-            });
         }
         get().calculateStats();
+        requestGoogleTaskSync();
     },
 
     deleteTask: (id) => {
-        set(state => ({ tasks: state.tasks.filter(t => t.id !== id) }));
-        persistentSyncQueue.add('delete-task', id, null);
+        const now = new Date().toISOString();
+        set(state => ({
+            tasks: state.tasks.map(t => (
+                t.id === id
+                    ? { ...t, deleted_at: now, updated_at: now, is_unsynced: true }
+                    : t
+            ))
+        }));
+        const task = get().tasks.find(t => t.id === id);
+        if (task) {
+            get().syncTaskToDb(task);
+        }
         get().calculateStats();
+        requestGoogleTaskSync();
     },
 
     completeTask: (id) => {

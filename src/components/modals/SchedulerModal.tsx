@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
 import { X, Clock, Users, Video, MapPin, CheckSquare, Calendar as CalIcon, AlignLeft, Bell, Globe } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { GoogleSyncService } from '../../lib/googleSyncService';
-import { GoogleClient, type GoogleTaskList, type GoogleCalendarListEntry } from '../../lib/googleClient';
-import type { RecurringConfig, Item, Task } from '../../lib/types';
+import {
+    GoogleClient,
+    isNoGoogleAccessTokenError,
+    type GoogleTaskList,
+    type GoogleCalendarListEntry
+} from '../../lib/googleClient';
+import type { RecurringConfig, Item, Task, ItemGoogleSyncMeta } from '../../lib/types';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { CustomRecurrenceModal } from './CustomRecurrenceModal';
 import { GoogleConnectBanner } from '../ui/GoogleConnectBanner';
@@ -15,10 +19,11 @@ interface SchedulerContentProps {
     item: Partial<Item> | Partial<Task>;
     isTaskType: boolean;
     onClose: () => void;
-    onSave: (updates: any) => Promise<void> | void;
+    onSave: (updates: Record<string, unknown>) => Promise<void> | void;
+    onDelete?: () => Promise<void> | void;
 }
 
-export function SchedulerContent({ item, isTaskType, onClose, onSave }: SchedulerContentProps) {
+export function SchedulerContent({ item, isTaskType, onClose, onSave, onDelete }: SchedulerContentProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [activeTab, setActiveTab] = useState<'event' | 'task'>(isTaskType ? 'task' : 'event');
 
@@ -68,8 +73,16 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
     // Fetch Google data when connected (uses DB-stored refresh token)
     useEffect(() => {
         if (hasGoogleAuth && !googleAuthLoading) {
-            GoogleClient.listTaskLists().then(setTaskLists).catch(console.error);
-            GoogleClient.listCalendars().then(setCalendars).catch(console.error);
+            GoogleClient.listTaskLists().then(setTaskLists).catch((error) => {
+                if (!isNoGoogleAccessTokenError(error)) {
+                    console.error(error);
+                }
+            });
+            GoogleClient.listCalendars().then(setCalendars).catch((error) => {
+                if (!isNoGoogleAccessTokenError(error)) {
+                    console.error(error);
+                }
+            });
         }
     }, [hasGoogleAuth, googleAuthLoading]);
 
@@ -77,7 +90,11 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
         if (item) {
             setTitle(item.title || '');
             // Task has description, Item doesn't - safely access
-            setDescription((item as any).description || '');
+            const nextDescription =
+                'description' in item && typeof item.description === 'string'
+                    ? item.description
+                    : '';
+            setDescription(nextDescription);
 
             const tmrw = new Date(); tmrw.setDate(tmrw.getDate() + 1);
             const defDate = tmrw.toISOString().split('T')[0];
@@ -95,15 +112,39 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
             }
 
             if (item.recurring_config) {
-                setRecurrence(item.recurring_config?.frequency as any || 'daily');
+                const frequency = item.recurring_config?.frequency;
+                if (
+                    frequency === 'daily' ||
+                    frequency === 'weekly' ||
+                    frequency === 'monthly' ||
+                    frequency === 'yearly'
+                ) {
+                    setRecurrence(frequency);
+                } else {
+                    setRecurrence('daily');
+                }
+            }
+
+            if (!isTaskType) {
+                const content = (item as Partial<Item>).content as ItemGoogleSyncMeta | undefined;
+                if (content?.google_sync_target === 'task' || content?.google_sync_target === 'event') {
+                    setActiveTab(content.google_sync_target);
+                }
+                if (content?.google_sync_calendar_id) {
+                    setCalendarId(content.google_sync_calendar_id);
+                }
+                if (content?.google_sync_task_list_id) {
+                    setTaskListId(content.google_sync_task_list_id);
+                }
             }
         }
-    }, [item]);
+    }, [item, isTaskType]);
 
     const handleSave = async () => {
         setIsSaving(true);
         try {
-            const updates: any = { title, description };
+            const updates: Record<string, unknown> = { title, description };
+            const selectedMode: 'event' | 'task' = isTaskType ? 'task' : activeTab;
 
             // Recurrence Logic
             let recurConfig: RecurringConfig | null = null;
@@ -120,7 +161,7 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
                 }
 
                 recurConfig = {
-                    frequency: freq === 'weekdays' ? 'weekly' : freq as any,
+                    frequency: freq === 'weekdays' ? 'weekly' : (freq as RecurringConfig['frequency']),
                     interval: 1,
                     time: isAllDay ? '09:00' : startTime,
                     byWeekDays,
@@ -131,43 +172,34 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
                 updates.recurring_config = null;
             }
 
-            if (activeTab === 'task') {
+            if (selectedMode === 'task') {
                 updates.scheduled_at = startDate ? new Date(startDate).toISOString() : null;
+                if (!isTaskType) {
+                    const existingContent = ((item as Partial<Item>).content || {}) as Record<string, unknown>;
+                    updates.content = {
+                        ...existingContent,
+                        google_sync_target: 'task',
+                        google_sync_task_list_id: taskListId,
+                        google_sync_calendar_id: null,
+                    };
+                }
 
                 await onSave(updates);
-
-                if (updates.scheduled_at) {
-                    await GoogleSyncService.syncToGoogleTask({ ...item, ...updates }, {
-                        listId: taskListId,
-                        dueDate: updates.scheduled_at,
-                        notes: description
-                    });
-                }
             } else {
                 // Event
                 const startIso = `${startDate}T${startTime}`;
                 updates.scheduled_at = new Date(startIso).toISOString();
+                if (!isTaskType) {
+                    const existingContent = ((item as Partial<Item>).content || {}) as Record<string, unknown>;
+                    updates.content = {
+                        ...existingContent,
+                        google_sync_target: 'event',
+                        google_sync_task_list_id: null,
+                        google_sync_calendar_id: calendarId,
+                    };
+                }
 
                 await onSave(updates);
-
-                let finalStart = isAllDay ? startDate : `${startDate}T${startTime}:00`;
-                let finalEnd = isAllDay ? endDate : `${endDate}T${endTime}:00`;
-
-                await GoogleSyncService.syncToGoogleEvent({ ...item, ...updates }, {
-                    calendarId,
-                    start: finalStart,
-                    end: finalEnd,
-                    isAllDay,
-                    description,
-                    location,
-                    colorId,
-                    attendees,
-                    addMeet,
-                    timezone,
-                    visibility,
-                    transparency: showAs === 'free' ? 'transparent' : 'opaque',
-                    reminders: notifications.map(n => ({ method: n.method, minutes: n.minutes }))
-                });
             }
             onClose();
         } catch (e) {
@@ -180,7 +212,7 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
 
     return (
         <div className="google-modal-overlay" onClick={onClose}>
-            <div className="google-card" onClick={e => e.stopPropagation()}>
+            <div className="google-card" role="dialog" aria-modal="true" aria-label="Scheduler" onClick={e => e.stopPropagation()}>
 
                 {/* HEADER */}
                 <div className="card-header">
@@ -212,7 +244,8 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
                     <div className="tabs-row">
                         <button
                             className={`tab-chip ${activeTab === 'event' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('event')}
+                            onClick={() => { if (!isTaskType) setActiveTab('event'); }}
+                            disabled={isTaskType}
                         >
                             Event
                         </button>
@@ -252,7 +285,7 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
                                     className="stylish-select recurrence-select"
                                     value={recurrence}
                                     onChange={e => {
-                                        const val = e.target.value as any;
+                                        const val = e.target.value as typeof recurrence;
                                         if (val === 'custom') setShowCustomRecurrence(true);
                                         else setRecurrence(val);
                                     }}
@@ -443,14 +476,26 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
                 {/* FOOTER */}
                 <div className="card-footer">
                     <div className="footer-left">
+                        {onDelete && (
+                            <button
+                                className="footer-dropdown"
+                                style={{ color: '#d93025', borderColor: '#d93025' }}
+                                onClick={async () => {
+                                    await onDelete();
+                                    onClose();
+                                }}
+                            >
+                                Delete
+                            </button>
+                        )}
                         {activeTab === 'event' && (
                             <>
-                                <select className="footer-dropdown" value={visibility} onChange={e => setVisibility(e.target.value as any)}>
+                                <select className="footer-dropdown" value={visibility} onChange={e => setVisibility(e.target.value as 'default' | 'public' | 'private')}>
                                     <option value="default">Default Visibility</option>
                                     <option value="public">Public</option>
                                     <option value="private">Private</option>
                                 </select>
-                                <select className="footer-dropdown" value={showAs} onChange={e => setShowAs(e.target.value as any)}>
+                                <select className="footer-dropdown" value={showAs} onChange={e => setShowAs(e.target.value as 'busy' | 'free')}>
                                     <option value="busy">Busy</option>
                                     <option value="free">Free</option>
                                 </select>
@@ -482,13 +527,51 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave }: Schedule
 }
 
 export function SchedulerModal() {
-    const { isSchedulerOpen, closeScheduler, schedulerItemId, schedulerEventId, schedulerOriginalStart, items, tasks, calendarEvents, updateItem, updateTask } = useAppStore();
+    const { isSchedulerOpen, closeScheduler, schedulerItemId, schedulerEventId, schedulerOriginalStart, items, tasks, calendarEvents, updateItem, updateTask, deleteItem, deleteTask } = useAppStore();
     if (!isSchedulerOpen) return null;
 
     // If we have a schedulerEventId, render EventSchedulerContent
     if (schedulerEventId) {
         const targetEvent = calendarEvents.find(e => e.id === schedulerEventId);
-        if (!targetEvent) return null;
+        if (!targetEvent) {
+            // Event might not be in store yet (just created) — create a blank placeholder
+            const now = new Date();
+            const placeholderEvent: import('../../lib/types').CalendarEvent = {
+                id: schedulerEventId,
+                user_id: 'demo',
+                title: '',
+                description: '',
+                start_at: now.toISOString(),
+                end_at: new Date(now.getTime() + 3600000).toISOString(),
+                is_all_day: false,
+                rrule: null,
+                parent_event_id: null,
+                recurring_event_id: null,
+                is_deleted_instance: false,
+                location: '',
+                color_id: '7',
+                visibility: 'default',
+                transparency: 'opaque',
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                attendees: [],
+                conference_data: null,
+                reminders: [{ method: 'popup', minutes: 10 }],
+                attachments: [],
+                google_event_id: null,
+                google_calendar_id: 'primary',
+                created_at: now.toISOString(),
+                updated_at: now.toISOString(),
+                deleted_at: null,
+                is_unsynced: true,
+            };
+            return (
+                <EventSchedulerContent
+                    event={placeholderEvent}
+                    originalStart={schedulerOriginalStart}
+                    onClose={closeScheduler}
+                />
+            );
+        }
 
         return (
             <EventSchedulerContent
@@ -514,6 +597,10 @@ export function SchedulerModal() {
             onSave={async (updates) => {
                 if (isTaskType) updateTask(item.id, updates);
                 else updateItem(item.id, updates);
+            }}
+            onDelete={async () => {
+                if (isTaskType) deleteTask(item.id);
+                else await deleteItem(item.id);
             }}
         />
     );

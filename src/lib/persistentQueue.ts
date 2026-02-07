@@ -126,8 +126,21 @@ class PersistentQueue {
     private saveToStorage() {
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(this.queue));
-        } catch (e) {
+        } catch (e: any) {
             console.error('[Queue] Failed to save to storage:', e);
+            // Notify user on quota exceeded — pending operations may be lost on reload
+            if (e?.name === 'QuotaExceededError' || e?.code === 22) {
+                console.error('[Queue] CRITICAL: localStorage quota exceeded. Sync data may be lost on page reload.');
+                try {
+                    import('../store/useAppStore').then(({ useAppStore }) => {
+                        useAppStore.getState().addNotification?.(
+                            'error',
+                            'Storage full',
+                            'Sync queue could not be saved. Clear some browser data or sync may be lost on refresh.'
+                        );
+                    });
+                } catch { /* best effort */ }
+            }
         }
     }
 
@@ -144,9 +157,9 @@ class PersistentQueue {
             // This ensures the Delete is the FINAL word.
             this.queue = this.queue.filter(op => op.id !== id);
         } else {
-            // Standard dedup: Remove previous op of SAME type
-            // (e.g. 5 fast edits -> only keep last edit)
-            this.queue = this.queue.filter(op => !(op.id === id && op.type === type));
+            // Remove ALL previous ops for the same ID (upserts AND deletes).
+            // Last operation wins — an upsert after delete means "restore/undelete".
+            this.queue = this.queue.filter(op => op.id !== id);
         }
 
         this.queue.push({
@@ -225,7 +238,15 @@ class PersistentQueue {
 
                 // Check for 429 Too Many Requests
                 if (statusCode === 429 || errorMsg.includes('Too Many Requests') || errorMsg.includes('rate limit')) {
-                    console.warn(`[Queue] Rate limited! Increasing delay from ${this.currentDelayMs}ms`);
+                    op.retries = (op.retries || 0) + 1;
+                    if (op.retries >= 10) {
+                        console.error(`[Queue] Operation ${op.type} for ${op.id} exceeded 429 retry limit (${op.retries}). Dropping.`);
+                        this.queue.shift();
+                        this.saveToStorage();
+                        this.stats.totalFailed++;
+                        continue;
+                    }
+                    console.warn(`[Queue] Rate limited! Attempt ${op.retries}/10. Increasing delay from ${this.currentDelayMs}ms`);
                     this.currentDelayMs = Math.min(MAX_DELAY_MS, this.currentDelayMs * DELAY_INCREASE_FACTOR);
                     this.stats.last429At = new Date().toISOString();
                     this.saveStats();
@@ -299,7 +320,7 @@ class PersistentQueue {
             // 1. Common Cleanup
             const entries = Object.entries(payload).filter(([, v]) => v !== undefined);
 
-            const COMMON_FORBIDDEN = ['is_unsynced', 'temp_id', 'error'];
+            const COMMON_FORBIDDEN = ['temp_id', 'error'];
 
             // 2. Strict Whitelisting based on Table
             let ALLOWED_KEYS: string[] = [];
@@ -308,13 +329,13 @@ class PersistentQueue {
                 ALLOWED_KEYS = ['id', 'user_id', 'name', 'color', 'order', 'items', 'created_at', 'item_count'];
             } else if (type === 'upsert-task') {
                 // Task fields (simplified scheduler)
-                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'item_ids', 'item_completion', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'tags'];
+                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'parent_task_id', 'sort_position', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'item_ids', 'item_completion', 'is_completed', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at', 'tags'];
             } else if (type === 'upsert-item') {
                 // Item fields (simplified scheduler)
                 ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
             } else if (type === 'upsert-event') {
                 // CalendarEvent fields
-                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'google_event_id', 'google_calendar_id', 'created_at', 'updated_at', 'deleted_at'];
+                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'attachments', 'google_event_id', 'google_calendar_id', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at'];
             }
 
             // Filter entries

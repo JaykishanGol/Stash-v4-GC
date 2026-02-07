@@ -56,7 +56,7 @@
     /* Colors - Text */
     --text-primary: #1F2937;
     --text-secondary: #6B7280;
-    --text-muted: #9CA3AF;
+    --text-muted: #737C87; /* Darkened from #9CA3AF for WCAG AA contrast */
 
     /* Colors - Cards */
     --card-coral: #FFB5A7;
@@ -1818,6 +1818,77 @@ input.title-input:focus {
 input.title-input::placeholder {
     color: var(--text-muted);
     font-weight: 500;
+}
+
+.note-editor-hint {
+    margin: 2px 0 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.note-editor-hint kbd {
+    font-family: var(--font-primary);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: #F3F4F6;
+    border: 1px solid var(--border-light);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+
+.checklist-mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 0 10px;
+    border-bottom: 1px solid var(--border-light);
+    margin-bottom: 8px;
+}
+
+.checklist-mode-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--accent-light);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.checklist-switch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-medium);
+    background: #FFFFFF;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.checklist-switch-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+    background: var(--accent-light);
+}
+
+.checklist-switch-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
 }
 
 .modal-sidebar-layout .input-wrapper {
@@ -4676,6 +4747,20 @@ button[style*="background: var(--accent)"]:hover::after {
         font-weight: 700 !important;
     }
 
+    .note-editor-hint {
+        font-size: 0.78rem;
+        margin-bottom: 10px;
+    }
+
+    .checklist-mode-row {
+        padding: 8px 0 10px;
+    }
+
+    .checklist-switch-btn {
+        min-height: 38px;
+        padding: 8px 10px;
+    }
+
     .input-wrapper {
         min-height: auto !important;
         flex: 1;
@@ -5074,6 +5159,25 @@ button[style*="background: var(--accent)"]:hover::after {
 /* ============================================
    DARK MODE
    ============================================ */
+
+/* Skip Navigation Link */
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 16px;
+    z-index: 10000;
+    padding: 12px 24px;
+    background: var(--accent, #F59E0B);
+    color: #000;
+    font-weight: 600;
+    border-radius: 0 0 8px 8px;
+    text-decoration: none;
+    transition: top 0.2s;
+}
+.skip-link:focus {
+    top: 0;
+}
+
 [data-theme="dark"] {
     /* Backgrounds */
     --bg-app: #121212;
@@ -5306,5 +5410,130 @@ button[style*="background: var(--accent)"]:hover::after {
 
 /* Settings modal dark */
 [data-theme="dark"] .settings-section {
+    border-color: var(--border-light);
+}
+
+/* ============================================
+   DARK MODE — Inline Style Overrides
+   These override hardcoded inline colors in components
+   ============================================ */
+
+/* MainCanvas: View toggle, restore buttons, empty state */
+[data-theme="dark"] .view-mode-toggle {
+    background: var(--bg-sidebar) !important;
+    border-color: var(--border-light) !important;
+}
+[data-theme="dark"] .view-mode-toggle button {
+    color: var(--text-secondary) !important;
+}
+[data-theme="dark"] .view-mode-toggle button.active {
+    background: var(--border-light) !important;
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] .restore-btn {
+    background: var(--bg-sidebar) !important;
+    border-color: var(--border-light) !important;
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] .empty-state {
+    color: var(--text-muted) !important;
+}
+[data-theme="dark"] .action-pill-btn.danger {
+    background: rgba(220, 38, 38, 0.15) !important;
+    border-color: rgba(220, 38, 38, 0.3) !important;
+    color: #FCA5A5 !important;
+}
+[data-theme="dark"] .section-title span {
+    color: var(--text-muted) !important;
+}
+
+/* SettingsModal: Section cards, headings, buttons */
+[data-theme="dark"] .settings-card {
+    background: var(--bg-sidebar) !important;
+    border-color: var(--border-light) !important;
+}
+[data-theme="dark"] .settings-heading {
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] .settings-subtext {
+    color: var(--text-secondary) !important;
+}
+[data-theme="dark"] .settings-btn {
+    background: var(--bg-sidebar) !important;
+    border-color: var(--border-light) !important;
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] .settings-divider {
+    border-top-color: var(--border-light) !important;
+}
+
+/* Modals: Generic overrides */
+[data-theme="dark"] .modal-content {
+    color: var(--text-primary);
+}
+[data-theme="dark"] .modal-body-text {
+    color: var(--text-secondary) !important;
+}
+
+/* FilePreviewModal: Sheet/doc backgrounds */
+[data-theme="dark"] .file-preview-modal .preview-sheet-container,
+[data-theme="dark"] .file-preview-modal .preview-docx-container {
+    background: var(--bg-sidebar) !important;
+}
+[data-theme="dark"] .file-preview-modal th {
+    background: var(--bg-app) !important;
+    color: var(--text-primary) !important;
+    border-bottom-color: var(--border-light) !important;
+}
+[data-theme="dark"] .file-preview-modal td {
+    color: var(--text-secondary) !important;
+    border-bottom-color: var(--border-light) !important;
+}
+[data-theme="dark"] .file-preview-modal tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.03) !important;
+}
+[data-theme="dark"] .file-preview-modal tr:nth-child(odd) {
+    background: transparent !important;
+}
+
+/* NotificationCenter: Status colors are intentionally semantic - keep as is */
+
+/* InfoPanel: History text */
+[data-theme="dark"] .info-panel .history-empty,
+[data-theme="dark"] .info-panel .history-loading {
+    color: var(--text-muted) !important;
+}
+
+/* AuthModal: Divider */
+[data-theme="dark"] .auth-divider-line {
+    background: var(--border-light) !important;
+}
+[data-theme="dark"] .auth-divider-text {
+    color: var(--text-muted) !important;
+}
+
+/* CommandPalette: No results */
+[data-theme="dark"] .command-palette-empty {
+    color: var(--text-muted) !important;
+}
+
+/* UploadToast: Container */
+[data-theme="dark"] .upload-toast-container {
+    background: var(--bg-sidebar) !important;
+    border-color: var(--border-light) !important;
+}
+
+/* ContextMenu: Subtle text */
+[data-theme="dark"] .context-menu .menu-item-count {
+    color: var(--text-muted) !important;
+}
+
+/* EditorErrorBoundary */
+[data-theme="dark"] .editor-error-msg {
+    color: #FCA5A5 !important;
+}
+
+/* Card bg_color comparison fix: transparent default in dark mode */
+[data-theme="dark"] .card[style*="backgroundColor"] {
     border-color: var(--border-light);
 }

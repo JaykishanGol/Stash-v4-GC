@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, isSameMonth, isSameDay, isToday, addMonths, subMonths } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus, ChevronDown } from 'lucide-react';
-import { GoogleClient, type GoogleCalendarListEntry } from '../../lib/googleClient';
+import { GoogleClient, isNoGoogleAccessTokenError, type GoogleCalendarListEntry } from '../../lib/googleClient';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 
 interface CalendarSidebarProps {
     selectedDate: Date | null;
     onDateChange: (date: Date) => void;
     onDateSelect: (date: Date) => void;
+    onCreateEvent?: () => void;
+    onCreateTask?: () => void;
+    onCalendarToggle?: (enabledIds: Set<string>) => void;
 }
 
-export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect }: CalendarSidebarProps) {
+export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect, onCreateEvent, onCreateTask, onCalendarToggle }: CalendarSidebarProps) {
     const [miniCalDate, setMiniCalDate] = useState(new Date());
     const [calendars, setCalendars] = useState<GoogleCalendarListEntry[]>([]);
     const [enabledCalendars, setEnabledCalendars] = useState<Set<string>>(new Set(['primary']));
@@ -25,7 +28,11 @@ export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect }: Ca
             GoogleClient.listCalendars().then(cals => {
                 setCalendars(cals);
                 setEnabledCalendars(new Set(cals.map(c => c.id)));
-            }).catch(console.error);
+            }).catch((error) => {
+                if (!isNoGoogleAccessTokenError(error)) {
+                    console.error(error);
+                }
+            });
         }
     }, [hasGoogleAuth, googleAuthLoading]);
 
@@ -41,6 +48,7 @@ export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect }: Ca
         if (newSet.has(calId)) newSet.delete(calId);
         else newSet.add(calId);
         setEnabledCalendars(newSet);
+        onCalendarToggle?.(newSet);
     };
 
     return (
@@ -54,10 +62,10 @@ export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect }: Ca
                 </button>
                 {showCreateMenu && (
                     <div className="create-menu">
-                        <button onClick={() => { setShowCreateMenu(false); /* Open scheduler as event */ }}>
+                        <button onClick={() => { setShowCreateMenu(false); onCreateEvent?.(); }}>
                             Event
                         </button>
-                        <button onClick={() => { setShowCreateMenu(false); /* Open scheduler as task */ }}>
+                        <button onClick={() => { setShowCreateMenu(false); onCreateTask?.(); }}>
                             Task
                         </button>
                     </div>

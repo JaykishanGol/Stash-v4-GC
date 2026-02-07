@@ -22,9 +22,9 @@ export function SettingsModal() {
 
     return (
         <div className="modal-overlay active" onClick={handleBackdropClick} style={{ zIndex: 999 }}>
-            <div ref={trapRef} className="modal" style={{ width: 500, maxWidth: '95vw', height: 'auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div ref={trapRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" style={{ width: 500, maxWidth: '95vw', height: 'auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
                 <div className="modal-header">
-                    <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <h2 className="modal-title" id="settings-modal-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <Settings size={20} />
                         Settings
                     </h2>

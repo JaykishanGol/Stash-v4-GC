@@ -68,7 +68,6 @@ export function useGoogleAuth() {
             const hasConnection = await hasStoredGoogleConnection();
             
             if (hasConnection) {
-                console.log('[useGoogleAuth] Found stored Google connection, will refresh on demand');
                 setState({
                     isConnected: true,
                     isLoading: false,
@@ -211,6 +210,7 @@ export function useGoogleAuth() {
  * (like GoogleClient)
  */
 let cachedAccessToken: { token: string; expiresAt: number } | null = null;
+let refreshPromise: Promise<string | null> | null = null;
 
 export async function getGoogleAccessTokenGlobal(): Promise<string | null> {
     // Check cache
@@ -218,40 +218,53 @@ export async function getGoogleAccessTokenGlobal(): Promise<string | null> {
         return cachedAccessToken.token;
     }
 
-    // Try session
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.provider_token) {
-        cachedAccessToken = {
-            token: session.provider_token,
-            expiresAt: Date.now() + 3500 * 1000,
-        };
-        return session.provider_token;
+    // Deduplicate concurrent refresh calls
+    if (refreshPromise) {
+        return refreshPromise;
     }
 
-    // Try session refresh
-    const { data: refreshedData } = await supabase.auth.refreshSession();
-    if (refreshedData.session?.provider_token) {
-        cachedAccessToken = {
-            token: refreshedData.session.provider_token,
-            expiresAt: Date.now() + 3500 * 1000,
-        };
-        return refreshedData.session.provider_token;
-    }
+    refreshPromise = (async () => {
+        try {
+            // Try session
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.provider_token) {
+                cachedAccessToken = {
+                    token: session.provider_token,
+                    expiresAt: Date.now() + 3500 * 1000,
+                };
+                return session.provider_token;
+            }
 
-    // Use stored refresh token
-    const refreshToken = await getStoredRefreshToken();
-    if (!refreshToken) {
-        return null;
-    }
+            // Try session refresh
+            const { data: refreshedData } = await supabase.auth.refreshSession();
+            if (refreshedData.session?.provider_token) {
+                cachedAccessToken = {
+                    token: refreshedData.session.provider_token,
+                    expiresAt: Date.now() + 3500 * 1000,
+                };
+                return refreshedData.session.provider_token;
+            }
 
-    const newAccessToken = await refreshGoogleAccessToken(refreshToken);
-    if (newAccessToken) {
-        cachedAccessToken = {
-            token: newAccessToken,
-            expiresAt: Date.now() + 3500 * 1000,
-        };
-        return newAccessToken;
-    }
+            // Use stored refresh token
+            const refreshToken = await getStoredRefreshToken();
+            if (!refreshToken) {
+                return null;
+            }
 
-    return null;
+            const newAccessToken = await refreshGoogleAccessToken(refreshToken);
+            if (newAccessToken) {
+                cachedAccessToken = {
+                    token: newAccessToken,
+                    expiresAt: Date.now() + 3500 * 1000,
+                };
+                return newAccessToken;
+            }
+
+            return null;
+        } finally {
+            refreshPromise = null;
+        }
+    })();
+
+    return refreshPromise;
 }

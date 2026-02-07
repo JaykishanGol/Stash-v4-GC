@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAppStore } from '../store/useAppStore';
 import type { Tables } from '../lib/database.types';
 import { adaptItemRow, adaptTaskRow, adaptListRow } from '../lib/dbAdapters';
+import { adaptEventRow } from '../lib/eventAdapters';
 import { tombstoneManager } from '../lib/tombstones';
 
 type ItemRow = Tables<'items'>;
@@ -21,10 +22,13 @@ export function useRealtimeSubscription() {
     const user = useAppStore((s) => s.user);
     const retryCount = useRef(0);
     const channelRef = useRef<RealtimeChannel | null>(null);
-    const lastFetchRef = useRef<number>(Date.now());
+    const lastFetchRef = useRef<number>(0);
 
     useEffect(() => {
         if (!user || user.id === 'demo') return;
+        if (!lastFetchRef.current) {
+            lastFetchRef.current = Date.now();
+        }
 
         function subscribe() {
             // Clean up previous channel if any
@@ -69,6 +73,38 @@ export function useRealtimeSubscription() {
                                 trashedItems: state.trashedItems.filter(i => i.id !== oldItem.id)
                             }));
                             store.calculateStats();
+                        }
+                    }
+                )
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*',
+                        schema: 'public',
+                        table: 'events',
+                        filter: `user_id=eq.${user!.id}`
+                    },
+                    (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+                        const { eventType, new: newEvent, old: oldEvent } = payload;
+
+                        if (eventType === 'INSERT') {
+                            const adaptedEvent = adaptEventRow(newEvent as unknown as Parameters<typeof adaptEventRow>[0]);
+                            useAppStore.setState(state => {
+                                const exists = state.calendarEvents.some(e => e.id === adaptedEvent.id);
+                                if (exists) return {};
+                                return { calendarEvents: [adaptedEvent, ...state.calendarEvents] };
+                            });
+                        } else if (eventType === 'UPDATE') {
+                            const adaptedEvent = adaptEventRow(newEvent as unknown as Parameters<typeof adaptEventRow>[0]);
+                            useAppStore.setState(state => ({
+                                calendarEvents: state.calendarEvents.map(e => e.id === adaptedEvent.id ? adaptedEvent : e)
+                            }));
+                        } else if (eventType === 'DELETE') {
+                            const deletedId = (oldEvent as { id?: string })?.id;
+                            if (!deletedId) return;
+                            useAppStore.setState(state => ({
+                                calendarEvents: state.calendarEvents.filter(e => e.id !== deletedId)
+                            }));
                         }
                     }
                 )

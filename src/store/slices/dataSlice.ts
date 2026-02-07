@@ -2,7 +2,6 @@ import type { StateCreator } from 'zustand';
 import type { AppState } from '../types';
 import {
     validateItemForSync,
-    isEventContent,
 } from '../../lib/types';
 import type {
     Item,
@@ -12,16 +11,122 @@ import type {
     SmartFolderCounts,
     TodayStats,
     UploadItem,
-    EventContent,
 } from '../../lib/types';
 import { persistentSyncQueue } from '../../lib/persistentQueue';
-import { googleSyncQueue } from '../../lib/googleSyncQueue';
 import { tombstoneManager } from '../../lib/tombstones';
+import { adaptItemRows } from '../../lib/dbAdapters';
 import { 
     undoStack, 
     createDeleteItemsAction, 
     createMoveItemsAction,
 } from '../../lib/undoStack';
+
+function requestGoogleItemSync() {
+    void import('../../lib/googleSyncEngine').then(({ googleSyncEngine }) => {
+        googleSyncEngine.scheduleSync('item-change', 500);
+    });
+}
+
+// Debounce helper for expensive store computations
+function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return ((...args: any[]) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), ms);
+    }) as unknown as T;
+}
+
+// Module-level references to set/get, assigned once when the slice is created
+let _sliceGet: (() => AppState) | null = null;
+let _sliceSet: ((partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void) | null = null;
+
+// Debounced implementations (created once at module load, use module-level get/set refs)
+const _debouncedCalculateStats = debounce(() => {
+    if (!_sliceGet || !_sliceSet) return;
+    const { items, tasks } = _sliceGet();
+    const smartFolderCounts: SmartFolderCounts = { notes: 0, links: 0, files: 0, images: 0, folders: 0 };
+    const todayStats: TodayStats = { dueToday: 0, reminders: 0, totalReminders: 0, overdue: 0, tasks: 0 };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    items.forEach(item => {
+        if (item.deleted_at || item.is_archived) return;
+        if (item.type === 'folder') {
+            smartFolderCounts.folders++;
+        } else {
+            const typeMap: Record<string, keyof SmartFolderCounts> = {
+                note: 'notes', link: 'links', file: 'files', image: 'images'
+            };
+            const key = typeMap[item.type];
+            if (key) smartFolderCounts[key]++;
+        }
+        if (item.scheduled_at && !item.is_completed) {
+            const scheduledDate = new Date(item.scheduled_at);
+            if (scheduledDate < today && !item.is_completed) todayStats.overdue++;
+            else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
+            if (item.remind_before !== null && item.remind_before !== undefined) {
+                if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
+                todayStats.totalReminders++;
+            }
+        }
+    });
+
+    tasks.forEach(task => {
+        if (task.is_completed) return;
+        todayStats.tasks++;
+        if (task.scheduled_at) {
+            const scheduledDate = new Date(task.scheduled_at);
+            if (scheduledDate < today) todayStats.overdue++;
+            else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
+            if (task.remind_before !== null) {
+                if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
+                todayStats.totalReminders++;
+            }
+        }
+    });
+
+    _sliceSet({ smartFolderCounts, todayStats });
+}, 300);
+
+const _debouncedRefreshFolderCounts = debounce(() => {
+    if (!_sliceGet || !_sliceSet) return;
+    const { items } = _sliceGet();
+    let hasChanges = false;
+    const updatedFolders: typeof items = [];
+
+    // Build a parent→children count map for O(n) instead of O(n²)
+    const childCountMap = new Map<string, number>();
+    for (const item of items) {
+        if (item.folder_id && !item.deleted_at) {
+            childCountMap.set(item.folder_id, (childCountMap.get(item.folder_id) || 0) + 1);
+        }
+    }
+
+    const newItems = items.map(item => {
+        if (item.type === 'folder') {
+            const count = childCountMap.get(item.id) || 0;
+            const currentCount = (item.content as any).itemCount || 0;
+            if (count !== currentCount) {
+                hasChanges = true;
+                const updatedFolder = {
+                    ...item,
+                    content: { ...item.content, itemCount: count },
+                    updated_at: new Date().toISOString()
+                };
+                updatedFolders.push(updatedFolder);
+                return updatedFolder;
+            }
+        }
+        return item;
+    });
+
+    if (hasChanges) {
+        _sliceSet({ items: newItems });
+    }
+}, 500);
 
 
 export interface DataSlice {
@@ -97,7 +202,12 @@ export interface DataSlice {
     clearAllUserData: () => void;
 }
 
-export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, get) => ({
+export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, get) => {
+    // Wire up module-level refs for debounced functions
+    _sliceGet = get;
+    _sliceSet = set;
+
+    return {
     items: [],
     trashedItems: [],
     folders: [],
@@ -142,8 +252,9 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             }
 
             if (moreItems && moreItems.length > 0) {
-                const activeItems = moreItems.filter((i: Item) => !i.deleted_at);
-                const trashedItems = moreItems.filter((i: Item) => i.deleted_at);
+                const adapted = adaptItemRows(moreItems);
+                const activeItems = adapted.filter((i: Item) => !i.deleted_at);
+                const trashedItems = adapted.filter((i: Item) => i.deleted_at);
 
                 set((state) => ({
                     items: [...state.items, ...activeItems],
@@ -159,6 +270,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             }
         } catch (error) {
             console.error('[Store] Error in loadMoreItems:', error);
+            get().addNotification?.('error', 'Load Failed', 'Could not load more items. Check your connection.');
         }
     },
 
@@ -199,38 +311,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         get().calculateStats();
         get().refreshFolderCounts();
         get().syncItemToDb(itemWithFlag);
-
-        // Google Sync (if scheduled)
-        if (itemWithFlag.scheduled_at) {
-            const syncOptions: any = {
-                start: itemWithFlag.scheduled_at,
-                end: itemWithFlag.scheduled_at,
-            };
-
-            // Event-type items carry richer sync info
-            if (itemWithFlag.type === 'event' && isEventContent(itemWithFlag.content)) {
-                const ec = itemWithFlag.content as EventContent;
-                syncOptions.end = ec.end_time || itemWithFlag.scheduled_at;
-                syncOptions.isAllDay = ec.is_all_day;
-                syncOptions.location = ec.location;
-                syncOptions.description = ec.description;
-                if (ec.attendees?.length) syncOptions.attendees = ec.attendees;
-                if (ec.meet_link) syncOptions.addMeet = true;
-                if (ec.color_id) syncOptions.colorId = ec.color_id;
-                if (ec.visibility) syncOptions.visibility = ec.visibility;
-                if (ec.show_as) syncOptions.transparency = ec.show_as === 'free' ? 'transparent' : 'opaque';
-                if (ec.timezone) syncOptions.timezone = ec.timezone;
-                if (ec.calendar_id) syncOptions.calendarId = ec.calendar_id;
-                if (ec.notifications?.length) {
-                    syncOptions.reminders = ec.notifications.map((n: any) => ({
-                        method: n.method || 'popup',
-                        minutes: n.minutes
-                    }));
-                }
-            }
-
-            googleSyncQueue.enqueue(itemWithFlag.id, 'event', itemWithFlag, syncOptions);
-        }
+        requestGoogleItemSync();
     },
 
     updateItem: (id, updates) => {
@@ -245,37 +326,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         const updatedItem = get().items.find(i => i.id === id);
         if (updatedItem) {
             get().syncItemToDb(updatedItem);
-
-            // Google Sync
-            if (updatedItem.scheduled_at) {
-                const syncOptions: any = {
-                    start: updatedItem.scheduled_at,
-                    end: updatedItem.scheduled_at,
-                };
-
-                if (updatedItem.type === 'event' && isEventContent(updatedItem.content)) {
-                    const ec = updatedItem.content as EventContent;
-                    syncOptions.end = ec.end_time || updatedItem.scheduled_at;
-                    syncOptions.isAllDay = ec.is_all_day;
-                    syncOptions.location = ec.location;
-                    syncOptions.description = ec.description;
-                    if (ec.attendees?.length) syncOptions.attendees = ec.attendees;
-                    if (ec.meet_link) syncOptions.addMeet = true;
-                    if (ec.color_id) syncOptions.colorId = ec.color_id;
-                    if (ec.visibility) syncOptions.visibility = ec.visibility;
-                    if (ec.show_as) syncOptions.transparency = ec.show_as === 'free' ? 'transparent' : 'opaque';
-                    if (ec.timezone) syncOptions.timezone = ec.timezone;
-                    if (ec.calendar_id) syncOptions.calendarId = ec.calendar_id;
-                    if (ec.notifications?.length) {
-                        syncOptions.reminders = ec.notifications.map((n: any) => ({
-                            method: n.method || 'popup',
-                            minutes: n.minutes
-                        }));
-                    }
-                }
-
-                googleSyncQueue.enqueue(updatedItem.id, 'event', updatedItem, syncOptions);
-            }
+            requestGoogleItemSync();
         }
     },
 
@@ -288,17 +339,15 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
     moveItemsToTrash: async (ids) => {
         const now = new Date().toISOString();
-        const state = get();
 
-        // 1. Check for Folders to use RPC optimization
-        const folderIds = ids.filter(id => state.items.find(i => i.id === id)?.type === 'folder');
+        // 1. Check for Folders to use RPC optimization (read state BEFORE async gap)
+        const preState = get();
+        const folderIds = ids.filter(id => preState.items.find(i => i.id === id)?.type === 'folder');
 
         // If we have folders, try to use the Server-Side RPC first (Phase 1 Fix)
         if (folderIds.length > 0) {
             const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
             if (isSupabaseConfigured()) {
-                // We execute one RPC per folder. 
-                // Ideally, we'd have a bulk RPC, but iterating 5 folders is better than iterating 5000 items.
                 for (const folderId of folderIds) {
                     try {
                         await supabase.rpc('delete_folder_recursive', { target_folder_id: folderId });
@@ -309,7 +358,8 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             }
         }
 
-        // 2. Local Fallback / UI Update (Standard Logic)
+        // 2. Re-read state AFTER async operations to avoid stale references
+        const state = get();
         // Helper to collect all descendants of a folder
         const getDescendants = (folderId: string): string[] => {
             const children = state.items.filter(i => i.folder_id === folderId);
@@ -386,6 +436,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             'Undo',
             () => get().undo()
         );
+        requestGoogleItemSync();
     },
 
     restoreItem: (id) => {
@@ -435,6 +486,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
         get().calculateStats();
         get().refreshFolderCounts();
+        requestGoogleItemSync();
     },
 
     permanentlyDeleteItem: async (id) => {
@@ -494,6 +546,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         idsToDelete.forEach(targetId => {
             get().deleteItemFromDb(targetId);
         });
+        requestGoogleItemSync();
     },
 
     emptyTrash: async () => {
@@ -524,7 +577,8 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
         const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
         
-        // 4. Optimistically clear local state immediately
+        // 4. Optimistically clear local state immediately (keep snapshot for rollback)
+        const trashedSnapshot = [...trashedItems];
         set({ trashedItems: [] });
 
         if (!isSupabaseConfigured()) {
@@ -532,6 +586,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             trashedItems.forEach(item => {
                 get().deleteItemFromDb(item.id);
             });
+            requestGoogleItemSync();
             return;
         }
 
@@ -554,8 +609,12 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         } catch (error) {
             console.error('[DataSlice] Server-side batch delete failed.', error);
             
+            // Restore local state so user sees the items again
+            set({ trashedItems: trashedSnapshot });
+            // Remove tombstones so the items are visible
+            trashedIds.forEach(id => tombstoneManager.remove?.(id));
+            
             // Fallback: Re-queue individual deletes to persistent queue
-            // This ensures they eventually get deleted even if the batch fail was transient
             trashedItems.forEach(item => {
                 get().deleteItemFromDb(item.id);
             });
@@ -563,6 +622,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             const state = get();
             state.addNotification?.('warning', 'Trash emptying slowly', 'Using fallback method due to network error.');
         }
+        requestGoogleItemSync();
     },
 
     toggleItemComplete: (id) => {
@@ -641,6 +701,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         });
 
         get().refreshFolderCounts();
+        requestGoogleItemSync();
 
         // Notify
         get().addNotification(
@@ -697,6 +758,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
         } catch (e) {
             console.error('Search failed', e);
+            get().addNotification?.('error', 'Search Error', 'Could not complete search. Please try again.');
             return [];
         }
     },
@@ -830,95 +892,10 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
     })),
     dismissAllUploads: () => set({ uploads: [] }),
 
-    // Stats
-    calculateStats: () => {
-        const { items, tasks } = get();
-        const smartFolderCounts: SmartFolderCounts = { notes: 0, links: 0, files: 0, images: 0, folders: 0 };
-        const todayStats: TodayStats = { dueToday: 0, reminders: 0, totalReminders: 0, overdue: 0, tasks: 0 };
+    // Stats (debounced to prevent excessive recalculation)
+    calculateStats: () => _debouncedCalculateStats(),
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        items.forEach(item => {
-            if (item.deleted_at || item.is_archived) return;
-
-            // Count ALL items by type (including nested in folders)
-            if (item.type === 'folder') {
-                smartFolderCounts.folders++;
-            } else {
-                const typeMap: Record<string, keyof SmartFolderCounts> = {
-                    note: 'notes', link: 'links', file: 'files', image: 'images'
-                };
-                const key = typeMap[item.type];
-                if (key) smartFolderCounts[key]++;
-            }
-
-            // Schedule stats (exclude items in folders to avoid noise)
-            if (item.scheduled_at && !item.is_completed) {
-                const scheduledDate = new Date(item.scheduled_at);
-                if (scheduledDate < today && !item.is_completed) todayStats.overdue++;
-                else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
-
-                // Count as reminder if remind_before is set
-                if (item.remind_before !== null && item.remind_before !== undefined) {
-                    if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
-                    todayStats.totalReminders++;
-                }
-            }
-        });
-
-        tasks.forEach(task => {
-            if (task.is_completed) return;
-            todayStats.tasks++;
-            if (task.scheduled_at) {
-                const scheduledDate = new Date(task.scheduled_at);
-                if (scheduledDate < today) todayStats.overdue++;
-                else if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.dueToday++;
-
-                if (task.remind_before !== null) {
-                    if (scheduledDate >= today && scheduledDate < tomorrow) todayStats.reminders++;
-                    todayStats.totalReminders++;
-                }
-            }
-        });
-
-        set({ smartFolderCounts, todayStats });
-    },
-
-    refreshFolderCounts: () => {
-        const { items } = get();
-        let hasChanges = false;
-        const updatedFolders: typeof items = [];
-
-        const newItems = items.map(item => {
-            if (item.type === 'folder') {
-                const count = items.filter(i => i.folder_id === item.id && !i.deleted_at).length;
-                const currentCount = (item.content as any).itemCount || 0;
-                if (count !== currentCount) {
-                    hasChanges = true;
-                    const updatedFolder = {
-                        ...item,
-                        content: { ...item.content, itemCount: count },
-                        updated_at: new Date().toISOString()
-                    };
-                    updatedFolders.push(updatedFolder);
-                    return updatedFolder;
-                }
-            }
-            return item;
-        });
-
-        if (hasChanges) {
-            set({ items: newItems });
-
-            // Sync updated folders to DB
-            updatedFolders.forEach(folder => {
-                get().syncItemToDb(folder);
-            });
-        }
-    },
+    refreshFolderCounts: () => _debouncedRefreshFolderCounts(),
 
     // Sync
     syncItemToDb: async (item) => {
@@ -958,4 +935,4 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         undoStack.clear();
         console.log('[Store] All user data cleared');
     },
-});
+}; };

@@ -305,6 +305,10 @@ export function toFullCalendarEvent(expanded: ExpandedEvent): Record<string, unk
         backgroundColor: color,
         borderColor: color,
         textColor: '#ffffff',
+        // Make calendar-native events explicitly draggable/resizable.
+        editable: true,
+        startEditable: true,
+        durationEditable: true,
         extendedProps: {
             eventId: ev.id,
             calendarEvent: ev,

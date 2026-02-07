@@ -3,7 +3,7 @@
  * Converts Supabase event rows to frontend CalendarEvent type.
  */
 
-import type { CalendarEvent, EventAttendee, EventReminder, EventConferenceData } from './types';
+import type { CalendarEvent, EventAttendee, EventReminder, EventConferenceData, EventAttachment } from './types';
 
 // The raw Supabase row shape for the events table
 interface EventRow {
@@ -26,8 +26,11 @@ interface EventRow {
     attendees: unknown;
     conference_data: unknown;
     reminders: unknown;
+    attachments: unknown;
     google_event_id: string | null;
     google_calendar_id: string | null;
+    google_etag: string | null;
+    remote_updated_at: string | null;
     created_at: string | null;
     updated_at: string | null;
     deleted_at: string | null;
@@ -72,8 +75,11 @@ export function adaptEventRow(row: EventRow): CalendarEvent {
         attendees: parseJsonArray<EventAttendee>(row.attendees),
         conference_data: parseJsonObject<EventConferenceData>(row.conference_data),
         reminders: parseJsonArray<EventReminder>(row.reminders, [{ method: 'popup', minutes: 10 }]),
+        attachments: parseJsonArray<EventAttachment>(row.attachments),
         google_event_id: row.google_event_id || null,
         google_calendar_id: row.google_calendar_id || 'primary',
+        google_etag: row.google_etag || null,
+        remote_updated_at: row.remote_updated_at || null,
         created_at: row.created_at || new Date().toISOString(),
         updated_at: row.updated_at || new Date().toISOString(),
         deleted_at: row.deleted_at || null,

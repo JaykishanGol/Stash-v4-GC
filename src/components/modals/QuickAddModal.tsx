@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     X,
     StickyNote,
@@ -13,7 +13,7 @@ import {
     Check
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import type { Item, ChecklistItem, CardColor } from '../../lib/types';
+import type { Item, ChecklistItem, CardColor, NoteContent } from '../../lib/types';
 import { CARD_COLORS, getColorKey } from '../../lib/types';
 import { generateId, isValidUrl, htmlToPlainText } from '../../lib/utils';
 import { RichTextEditor } from '../editor/RichTextEditor';
@@ -88,8 +88,7 @@ export function QuickAddModal() {
                     setDueDate(editingItem.scheduled_at.split('T')[0]);
                 }
                 if (editingItem.type === 'note') {
-                    // Type assertion to NoteContent
-                    const noteContent = editingItem.content as any;
+                    const noteContent = editingItem.content as NoteContent;
 
                     // Determine mode based on content
                     if (noteContent.checklist && Array.isArray(noteContent.checklist) && noteContent.checklist.length > 0) {
@@ -285,6 +284,16 @@ export function QuickAddModal() {
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (
+            quickAddType === 'note' &&
+            (e.metaKey || e.ctrlKey) &&
+            e.shiftKey &&
+            e.key.toLowerCase() === 'k'
+        ) {
+            e.preventDefault();
+            toggleChecklistMode();
+            return;
+        }
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             handleSubmit();
         }
@@ -292,6 +301,13 @@ export function QuickAddModal() {
             handleClose();
         }
     };
+
+    const noteHasText = useMemo(() => htmlToPlainText(content).trim().length > 0, [content]);
+    const checklistHasText = useMemo(
+        () => checklist.some((item) => item.text.trim().length > 0),
+        [checklist]
+    );
+    const showNoteEditorHint = quickAddType === 'note' && !noteHasText && !checklistHasText;
 
     if (!isQuickAddOpen) return null;
 
@@ -313,7 +329,11 @@ export function QuickAddModal() {
                             onSave={(updates) => {
                                 setSchedulerUpdates(prev => ({ ...prev, ...updates }));
                                 // Also sync back basic fields to UI if updated
-                                if (updates.scheduled_at) setDueDate(updates.scheduled_at.split('T')[0]);
+                                const nextScheduledAt =
+                                    typeof updates.scheduled_at === 'string' ? updates.scheduled_at : null;
+                                if (nextScheduledAt) {
+                                    setDueDate(nextScheduledAt.split('T')[0]);
+                                }
                                 setIsLocalSchedulerOpen(false);
                             }}
                         />
@@ -323,10 +343,13 @@ export function QuickAddModal() {
 
             <div
                 className="modal modal-sidebar-layout"
+                role="dialog"
+                aria-modal="true"
+                aria-label={editingItem ? 'Edit item' : 'Add new item'}
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Close Button (Desktop Only) */}
-                <button className="modal-close-floating desktop-only" onClick={handleClose}>
+                <button className="modal-close-floating desktop-only" onClick={handleClose} aria-label="Close">
                     <X size={20} />
                 </button>
 
@@ -358,27 +381,6 @@ export function QuickAddModal() {
                         <h2 className="content-title">
                             {editingItem ? 'Edit' : 'New'} {quickAddType.charAt(0).toUpperCase() + quickAddType.slice(1)}
                         </h2>
-
-                        {/* Note Toolbar Actions */}
-                        {quickAddType === 'note' && (
-                            <div className="note-actions" style={{ display: 'flex', gap: 8, marginLeft: 'auto', marginRight: 16 }}>
-                                <button
-                                    className={`icon-btn ${isChecklistMode ? 'active' : ''}`}
-                                    onClick={toggleChecklistMode}
-                                    title="Toggle Checklist"
-                                    style={{
-                                        padding: 6,
-                                        borderRadius: 4,
-                                        border: 'none',
-                                        background: isChecklistMode ? 'var(--accent-light)' : 'transparent',
-                                        color: isChecklistMode ? 'var(--accent)' : 'var(--text-secondary)',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    <ListChecks size={20} />
-                                </button>
-                            </div>
-                        )}
 
                         {/* Mobile Save Button */}
                         <button className="mobile-only icon-btn save-btn" onClick={handleSubmit} style={{ color: 'var(--accent)', fontWeight: 'bold' }} aria-label="Save">
@@ -415,18 +417,41 @@ export function QuickAddModal() {
                         {/* Note Type Content */}
                         {quickAddType === 'note' && (
                             <div className="input-wrapper rich-text-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                                {showNoteEditorHint && (
+                                    <p className="note-editor-hint">
+                                        Use toolbar or <kbd>Cmd/Ctrl+Shift+K</kbd> for checklist.
+                                    </p>
+                                )}
                                 {isChecklistMode ? (
-                                    <ChecklistEditor
-                                        items={checklist}
-                                        onChange={setChecklist}
-                                        autoFocus={true}
-                                    />
+                                    <>
+                                        <div className="checklist-mode-row">
+                                            <span className="checklist-mode-pill">Checklist</span>
+                                            <button
+                                                type="button"
+                                                className="checklist-switch-btn"
+                                                onClick={toggleChecklistMode}
+                                                title="Switch to rich text (Ctrl/Cmd+Shift+K)"
+                                                aria-label="Switch to rich text mode"
+                                            >
+                                                <ListChecks size={16} />
+                                                <span>Rich text</span>
+                                            </button>
+                                        </div>
+                                        <ChecklistEditor
+                                            items={checklist}
+                                            onChange={setChecklist}
+                                            autoFocus={true}
+                                        />
+                                    </>
                                 ) : (
                                     <RichTextEditor
                                         content={content}
                                         onChange={setContent}
                                         placeholder="Write your note..."
                                         autoFocus={true}
+                                        showChecklistModeToggle={true}
+                                        onToggleChecklistMode={toggleChecklistMode}
+                                        isChecklistMode={isChecklistMode}
                                     />
                                 )}
                             </div>

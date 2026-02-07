@@ -115,10 +115,11 @@ export const createClipboardUndoSlice: StateCreator<AppState, [], [], ClipboardU
                 get().addNotification?.('warning', 'Deep Copy Unavailable', 'Only empty folders were copied while offline.');
             }
 
-            // 2. Handle Regular Items (Client-side Duplicate)
+            // 2. Handle Regular Items (Client-side Duplicate with deep clone)
             itemsToCopy.forEach((item: Item) => {
+                const cloned = typeof structuredClone === 'function' ? structuredClone(item) : JSON.parse(JSON.stringify(item));
                 const newItem = {
-                    ...item,
+                    ...cloned,
                     id: crypto.randomUUID(),
                     folder_id: targetFolderId,
                     created_at: now,

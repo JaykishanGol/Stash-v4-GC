@@ -13,6 +13,7 @@ export function Layout() {
 
     return (
         <div className="app-container">
+            <a href="#main-content" className="skip-link">Skip to content</a>
             <RouteSyncer />
             {!isAuthModalOpen && (
                 <ComponentErrorBoundary name="Sidebar">

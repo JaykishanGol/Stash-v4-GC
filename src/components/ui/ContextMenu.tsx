@@ -137,7 +137,7 @@ export function ContextMenu() {
         };
 
         return createPortal(
-            <div ref={menuRef} className="ctx-menu" style={style}>
+            <div ref={menuRef} className="ctx-menu" role="menu" style={style}>
                 <div className="ctx-header">
                     <span className="ctx-title">{list.name}</span>
                     <span className="ctx-type">LIST</span>
@@ -261,7 +261,10 @@ export function ContextMenu() {
         } else if (item.type === 'note') {
             setEditingItem(item);
         } else if (item.type === 'link') {
-            window.open((item.content as any).url, '_blank');
+            const url = (item.content as any)?.url;
+            if (url && /^https?:\/\//i.test(url)) {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }
         } else if (item.type === 'folder') {
             useAppStore.getState().setSelectedFolder(item.id);
         }
@@ -392,7 +395,7 @@ export function ContextMenu() {
 
     // ============ RENDER ============
     return createPortal(
-        <div ref={menuRef} className="ctx-menu" style={style}>
+        <div ref={menuRef} className="ctx-menu" role="menu" style={style}>
             {item || task ? (
                 // ============ ITEM/TASK CONTEXT MENU ============
                 <>

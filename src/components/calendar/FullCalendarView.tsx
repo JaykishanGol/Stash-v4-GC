@@ -40,10 +40,20 @@ interface FullCalendarViewProps {
     viewMode: CalendarViewMode;
     onEventClick: (eventId: string, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string) => void;
     onDateSelect: (start: Date, end: Date, allDay: boolean) => void;
-    onEventDrop: (eventId: string, newStart: Date, newEnd: Date, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string) => void;
+    onEventDrop: (eventId: string, newStart: Date, newEnd: Date, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string, isScheduledItem?: boolean, isTask?: boolean) => void;
     onEventResize?: (eventId: string, newStart: Date, newEnd: Date, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string) => void;
     onEventDeleted?: (message: string, undoFn: () => void) => void;
+    /** Called when an external item/task is dropped onto the calendar */
+    onExternalDrop?: (itemId: string, isTask: boolean, start: Date) => void;
     calendarRef: React.RefObject<FullCalendar | null>;
+    /** Google ghost events to overlay (read-only) */
+    googleGhostEvents?: Array<{ id: string; title: string; start: Date; end?: Date; allDay: boolean; color: string; editable: false; extendedProps: Record<string, unknown> }>;
+    /** Set of enabled calendar IDs for filtering */
+    enabledCalendarIds?: Set<string>;
+    /** Primary timezone for rendering */
+    timezone?: string;
+    /** Secondary timezone to display alongside */
+    secondaryTimezone?: string;
 }
 
 export function FullCalendarView({
@@ -53,7 +63,12 @@ export function FullCalendarView({
     onEventDrop,
     onEventResize,
     onEventDeleted,
+    onExternalDrop,
     calendarRef,
+    googleGhostEvents = [],
+    enabledCalendarIds,
+    timezone,
+    secondaryTimezone,
 }: FullCalendarViewProps) {
     const calendarEvents = useAppStore((s) => s.calendarEvents);
     const items = useAppStore((s) => s.items);
@@ -90,7 +105,7 @@ export function FullCalendarView({
 
         // Add scheduled items (non-deleted, with scheduled_at)
         const scheduledItems = items
-            .filter(i => i.scheduled_at && !i.deleted_at)
+            .filter(i => i.scheduled_at && !i.deleted_at && i.type !== 'event')
             .filter(i => {
                 const d = new Date(i.scheduled_at!);
                 return d >= visibleRange.start && d <= visibleRange.end;
@@ -107,6 +122,8 @@ export function FullCalendarView({
                     backgroundColor: color,
                     borderColor: color,
                     textColor: '#ffffff',
+                    editable: true, // can drag to move
+                    durationEditable: false, // items have no end time — can't resize
                     extendedProps: {
                         eventId: item.id,
                         isScheduledItem: true,
@@ -140,6 +157,8 @@ export function FullCalendarView({
                     backgroundColor: color,
                     borderColor: color,
                     textColor: '#ffffff',
+                    editable: true,
+                    durationEditable: false, // tasks have no end time
                     extendedProps: {
                         eventId: task.id,
                         isScheduledItem: true,
@@ -149,29 +168,51 @@ export function FullCalendarView({
                 };
             });
 
-        return [...calEvents, ...scheduledItems, ...scheduledTasks];
-    }, [calendarEvents, items, tasks, visibleRange]);
+        // Merge google ghost events
+        let allEvents = [...calEvents, ...scheduledItems, ...scheduledTasks, ...googleGhostEvents];
+
+        // Filter by enabled calendar IDs if provided
+        if (enabledCalendarIds && enabledCalendarIds.size > 0) {
+            allEvents = allEvents.filter(ev => {
+                const calId = (ev as { extendedProps?: { calendarEvent?: CalendarEvent } }).extendedProps?.calendarEvent?.google_calendar_id;
+                // Items, tasks, and ghost events always pass; calendar events filter by their calendar ID
+                if (!calId) return true;
+                return enabledCalendarIds.has(calId);
+            });
+        }
+
+        return allEvents;
+    }, [calendarEvents, items, tasks, visibleRange, googleGhostEvents, enabledCalendarIds]);
 
     // Click on an event — show popover for calendar events, navigate for items/tasks
     const handleEventClick = useCallback(
         (info: EventClickArg) => {
             const props = info.event.extendedProps;
 
+            // Google ghost events → open in Google Calendar
+            if (props.isGoogleGhost) {
+                const htmlLink = props.htmlLink as string | undefined;
+                if (htmlLink) window.open(htmlLink, '_blank');
+                return;
+            }
+
             // Scheduled items/tasks → open editor/task directly
             if (props.isScheduledItem) {
-                const id = props.eventId;
-                if (props.isTask) {
-                    useAppStore.getState().setSelectedTask(id);
-                } else {
-                    const item = useAppStore.getState().items.find(i => i.id === id);
-                    if (item) useAppStore.getState().setEditingItem(item);
-                }
+                const id = String(props.eventId || info.event.id).replace(/^(task-|item-)/, '');
+                // Open scheduler details for both tasks and items.
+                // This keeps calendar interactions inside the scheduler flow.
+                useAppStore.getState().openScheduler(id);
                 return;
             }
 
             const calEvent = props.calendarEvent as CalendarEvent | undefined;
+            const resolvedEvent =
+                calEvent ||
+                (props.eventId
+                    ? useAppStore.getState().calendarEvents.find(e => e.id === props.eventId)
+                    : undefined);
 
-            if (!calEvent) {
+            if (!resolvedEvent) {
                 // Fallback: open scheduler directly if no calendarEvent data
                 onEventClick(
                     props.eventId || info.event.id,
@@ -187,7 +228,7 @@ export function FullCalendarView({
             const rect = el.getBoundingClientRect();
 
             setPopover({
-                event: calEvent,
+                event: resolvedEvent,
                 anchorRect: rect,
                 isRecurrenceInstance: !!props.isRecurrenceInstance,
                 masterEventId: props.masterEventId,
@@ -212,30 +253,74 @@ export function FullCalendarView({
     const handleEventDrop = useCallback(
         (info: EventDropArg) => {
             const props = info.event.extendedProps;
+            // Don't allow dropping read-only google ghost events
+            if (props.isGoogleGhost) {
+                info.revert();
+                useAppStore.getState().addNotification?.(
+                    'info',
+                    'Read-only Google event',
+                    'This event comes from Google. Move it in Google Calendar, then refresh.'
+                );
+                return;
+            }
             const newStart = info.event.start!;
-            const newEnd = info.event.end || new Date(newStart.getTime() + 3600000);
+            const calendarEvent = props.calendarEvent as CalendarEvent | undefined;
+            const originalDurationMs = calendarEvent
+                ? Math.max(
+                    1,
+                    new Date(calendarEvent.end_at).getTime() - new Date(calendarEvent.start_at).getTime()
+                )
+                : info.event.allDay
+                    ? 24 * 60 * 60 * 1000
+                    : 60 * 60 * 1000;
+            const newEnd = info.event.end || new Date(newStart.getTime() + originalDurationMs);
+            const normalizedId = String(props.eventId || info.event.id).replace(/^(task-|item-)/, '');
             onEventDrop(
-                props.eventId || info.event.id,
+                normalizedId,
                 newStart,
                 newEnd,
                 !!props.isRecurrenceInstance,
                 props.masterEventId,
-                props.originalStart
+                props.originalStart,
+                !!props.isScheduledItem,
+                !!props.isTask,
             );
         },
         [onEventDrop]
     );
 
-    // Resize an event (change end time by dragging edge)
+    // Resize an event (change end time by dragging edge) — only CalendarEvents support resize
     const handleEventResize = useCallback(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (info: any) => {
             if (!onEventResize) return;
             const props = info.event.extendedProps;
+            // Ghost events and scheduled items/tasks can't be resized
+            if (props.isGoogleGhost || props.isScheduledItem) {
+                info.revert();
+                if (props.isGoogleGhost) {
+                    useAppStore.getState().addNotification?.(
+                        'info',
+                        'Read-only Google event',
+                        'This event comes from Google. Resize it in Google Calendar.'
+                    );
+                }
+                return;
+            }
             const newStart = info.event.start!;
-            const newEnd = info.event.end || new Date(newStart.getTime() + 3600000);
+            const calendarEvent = props.calendarEvent as CalendarEvent | undefined;
+            const originalDurationMs = calendarEvent
+                ? Math.max(
+                    1,
+                    new Date(calendarEvent.end_at).getTime() - new Date(calendarEvent.start_at).getTime()
+                )
+                : info.event.allDay
+                    ? 24 * 60 * 60 * 1000
+                    : 60 * 60 * 1000;
+            const newEnd = info.event.end || new Date(newStart.getTime() + originalDurationMs);
+            const normalizedId = String(props.eventId || info.event.id).replace(/^(task-|item-)/, '');
             onEventResize(
-                props.eventId || info.event.id,
+                normalizedId,
                 newStart,
                 newEnd,
                 !!props.isRecurrenceInstance,
@@ -246,18 +331,32 @@ export function FullCalendarView({
         [onEventResize]
     );
 
+    // Handle external items/tasks dropped onto the calendar from the side panel
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleEventReceive = useCallback((info: any) => {
+        if (!onExternalDrop) { info.revert(); return; }
+        const props = info.event.extendedProps;
+        const itemId = props.externalItemId as string;
+        const isTask = !!props.externalIsTask;
+        const start = info.event.start!;
+        // Remove the event FullCalendar auto-created — we'll let the store + fcEvents memo handle it
+        info.event.remove();
+        onExternalDrop(itemId, isTask, start);
+    }, [onExternalDrop]);
+
     // Custom event content renderer
     const renderEventContent = useCallback((arg: EventContentArg) => {
         const props = arg.event.extendedProps;
         const isTask = props.isTask;
+        const isGhost = props.isGoogleGhost;
         const color = arg.event.backgroundColor || '#039be5';
 
         if (arg.view.type === 'dayGridMonth') {
             // Month view: compact dot + title
             return (
                 <div
-                    className="fc-google-event-month"
-                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '1px 4px', overflow: 'hidden' }}
+                    className={`fc-google-event-month ${isGhost ? 'fc-ghost-event' : ''}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '1px 4px', overflow: 'hidden', opacity: isGhost ? 0.7 : 1 }}
                 >
                     {isTask ? (
                         <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 2, border: `2px solid ${color}`, display: 'inline-block' }} />
@@ -270,6 +369,7 @@ export function FullCalendarView({
                         </span>
                     )}
                     <span style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {isGhost && <span style={{ marginRight: 3, fontSize: 10 }}>G</span>}
                         {arg.event.title}
                     </span>
                 </div>
@@ -279,13 +379,15 @@ export function FullCalendarView({
         // Week/Day view: vertical card
         return (
             <div
-                className="fc-google-event-time"
+                className={`fc-google-event-time ${isGhost ? 'fc-ghost-event' : ''}`}
                 style={{
                     padding: '2px 6px',
                     overflow: 'hidden',
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
+                    opacity: isGhost ? 0.7 : 1,
+                    borderLeft: isGhost ? `3px dashed ${color}` : undefined,
                 }}
             >
                 <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -305,7 +407,12 @@ export function FullCalendarView({
     }, []);
 
     return (
-        <div className="fullcalendar-google-wrapper" style={{ height: '100%', overflow: 'auto' }}>
+        <div className="fullcalendar-google-wrapper" style={{ height: '100%', overflow: 'auto', display: 'flex' }}>
+            {/* Secondary timezone column (shown in week/day views) */}
+            {secondaryTimezone && (viewMode === 'timeGridWeek' || viewMode === 'timeGridDay') && (
+                <SecondaryTimezoneColumn timezone={secondaryTimezone} />
+            )}
+            <div style={{ flex: 1, height: '100%' }}>
             <FullCalendar
                 ref={calendarRef}
                 plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
@@ -313,6 +420,8 @@ export function FullCalendarView({
                 headerToolbar={false} // We use our own header
                 events={fcEvents}
                 editable={true}
+                eventStartEditable={true}
+                eventDurationEditable={true}
                 selectable={true}
                 selectMirror={true}
                 dayMaxEvents={true} // "+N more" in month view
@@ -325,10 +434,13 @@ export function FullCalendarView({
                 snapDuration="00:15:00"
                 scrollTime="08:00:00"
                 height="100%"
+                timeZone={timezone || 'local'}
                 eventClick={handleEventClick}
                 select={handleDateSelect}
                 eventDrop={handleEventDrop}
                 eventResize={handleEventResize}
+                eventReceive={handleEventReceive}
+                droppable={true}
                 datesSet={handleDatesSet}
                 eventContent={renderEventContent}
                 eventTimeFormat={{
@@ -345,6 +457,7 @@ export function FullCalendarView({
                 eventDisplay="block"
                 eventBorderColor="transparent"
             />
+            </div>
 
             {/* Event Popover (Google Calendar style click preview) */}
             {popover && (
@@ -358,6 +471,46 @@ export function FullCalendarView({
                     onDeleted={onEventDeleted}
                 />
             )}
+        </div>
+    );
+}
+
+/** Renders a secondary timezone column alongside the time grid */
+function SecondaryTimezoneColumn({ timezone }: { timezone: string }) {
+    const hours = Array.from({ length: 24 }, (_, i) => i);
+    const shortTZ = timezone.split('/').pop()?.replace(/_/g, ' ') || timezone;
+
+    return (
+        <div className="secondary-tz-column" style={{
+            width: 52,
+            minWidth: 52,
+            borderRight: '1px solid var(--border-light, #dadce0)',
+            paddingTop: 68, // Align with time grid header height
+            overflow: 'hidden',
+            fontSize: 10,
+            color: 'var(--text-tertiary, #70757a)',
+            background: 'var(--bg-content, #fff)',
+            flexShrink: 0,
+        }}>
+            <div style={{ fontSize: 9, fontWeight: 600, textAlign: 'center', padding: '2px 0 4px', color: 'var(--text-muted, #9aa0a6)', borderBottom: '1px solid var(--border-light, #dadce0)' }}>
+                {shortTZ}
+            </div>
+            {hours.map(h => {
+                // Convert local hour to the secondary timezone
+                const now = new Date();
+                now.setHours(h, 0, 0, 0);
+                let tzTime: string;
+                try {
+                    tzTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone });
+                } catch {
+                    tzTime = `${h}:00`;
+                }
+                return (
+                    <div key={h} style={{ height: 48, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 2, borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                        {tzTime}
+                    </div>
+                );
+            })}
         </div>
     );
 }

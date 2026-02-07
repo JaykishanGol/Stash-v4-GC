@@ -300,10 +300,10 @@ export function isEmpty(value: unknown): boolean {
     return false;
 }
 
-// Helper to convert HTML to plain text
+// Helper to convert HTML to plain text (sanitized to prevent XSS)
 export function htmlToPlainText(html: string): string {
     const div = document.createElement('div');
-    div.innerHTML = html;
+    div.innerHTML = DOMPurify.sanitize(html);
     return div.textContent || div.innerText || '';
 }
 

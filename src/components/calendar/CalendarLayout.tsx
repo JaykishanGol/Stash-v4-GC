@@ -1,23 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { format } from 'date-fns';
 import { FullCalendarView, type CalendarViewMode } from './FullCalendarView';
+import { CalendarYearView } from './CalendarYearView';
 import { TasksPanel } from './TasksPanel';
 import { CalendarFAB } from './CalendarFAB';
 import { CalendarSidebar } from './CalendarSidebar';
 import { UndoToast, type UndoAction } from './UndoToast';
 import { RecurrenceEditDialog } from '../modals/RecurrenceEditDialog';
 import { useCalendarShortcuts } from '../../hooks/useCalendarShortcuts';
-import { ChevronLeft, ChevronRight, RefreshCw, Layout, Calendar as CalendarIcon, Menu } from 'lucide-react';
+import { useEventReminders } from '../../hooks/useEventReminders';
+import { ChevronLeft, ChevronRight, RefreshCw, Layout, Calendar as CalendarIcon, Menu, Search, X } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { googleSyncEngine } from '../../lib/googleSyncEngine';
 import type FullCalendar from '@fullcalendar/react';
 import type { RecurrenceEditMode } from '../../lib/types';
 
-type ViewModeSimple = 'month' | 'week' | 'day';
+type ViewModeSimple = 'month' | 'week' | 'day' | 'agenda' | 'year';
 
-const VIEW_MAP: Record<ViewModeSimple, CalendarViewMode> = {
+const VIEW_MAP: Record<Exclude<ViewModeSimple, 'year'>, CalendarViewMode> = {
     month: 'dayGridMonth',
     week: 'timeGridWeek',
     day: 'timeGridDay',
+    agenda: 'listWeek',
 };
 
 export function CalendarLayout() {
@@ -27,6 +31,12 @@ export function CalendarLayout() {
     const [isTaskPanelOpen, setIsTaskPanelOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+    // Search state
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    // Enabled calendar IDs for multi-calendar filtering
+    const [enabledCalendarIds, setEnabledCalendarIds] = useState<Set<string>>(new Set(['primary']));
 
     // Undo toast state
     const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
@@ -47,13 +57,18 @@ export function CalendarLayout() {
         openEventScheduler,
         addEvent,
         updateEvent,
+        updateItem,
+        updateTask,
         calendarEvents,
         user,
         loadEvents,
         isEventsLoading,
     } = useAppStore();
 
-    // Undo handler — called from popover when event is deleted
+    // In-app event reminder notifications
+    useEventReminders();
+
+    // Undo handler â€” called from popover when event is deleted
     const handleEventDeleted = useCallback((message: string, undoFn: () => void) => {
         undoIdRef.current++;
         setUndoAction({
@@ -73,6 +88,7 @@ export function CalendarLayout() {
     // Sync FullCalendar's view when viewMode changes from our buttons
     // Use requestAnimationFrame to avoid flushSync warning from FullCalendar
     useEffect(() => {
+        if (viewMode === 'year') return; // Year view is custom, not FullCalendar
         const api = calendarRef.current?.getApi();
         if (api) {
             requestAnimationFrame(() => {
@@ -136,17 +152,25 @@ export function CalendarLayout() {
                 attendees: [],
                 conference_data: null,
                 reminders: [{ method: 'popup', minutes: 10 }],
+                attachments: [],
                 google_event_id: null,
                 google_calendar_id: 'primary',
                 deleted_at: null,
                 is_unsynced: true,
             }).then((newEvent) => {
-                setTimeout(() => openEventScheduler(newEvent.id), 200);
+                requestAnimationFrame(() => openEventScheduler(newEvent.id));
             });
+        },
+        search: () => {
+            setIsSearchOpen(true);
+            setTimeout(() => searchInputRef.current?.focus(), 100);
+        },
+        onEscape: () => {
+            if (isSearchOpen) { setIsSearchOpen(false); setSearchQuery(''); }
         },
     });
 
-    // Handle sidebar date click → navigate FullCalendar
+    // Handle sidebar date click â†’ navigate FullCalendar
     const handleSidebarDateChange = useCallback((date: Date) => {
         const api = calendarRef.current?.getApi();
         if (api) {
@@ -185,7 +209,7 @@ export function CalendarLayout() {
     const handleDateSelect = useCallback(
         (start: Date, end: Date, allDay: boolean) => {
             // Create a new event at the selected time range
-            addEvent({
+            const newEvent = addEvent({
                 user_id: user?.id || 'demo',
                 title: '',
                 description: '',
@@ -204,20 +228,48 @@ export function CalendarLayout() {
                 attendees: [],
                 conference_data: null,
                 reminders: [{ method: 'popup', minutes: 10 }],
+                attachments: [],
                 google_event_id: null,
                 google_calendar_id: 'primary',
                 deleted_at: null,
                 is_unsynced: true,
-            }).then((newEvent) => {
-                // Open scheduler for further editing
-                setTimeout(() => openEventScheduler(newEvent.id), 200);
+            });
+            // addEvent returns a promise; open scheduler as soon as it resolves
+            newEvent.then((ev) => {
+                // Use requestAnimationFrame to ensure state has settled
+                requestAnimationFrame(() => openEventScheduler(ev.id));
             });
         },
         [addEvent, openEventScheduler, user]
     );
 
     const handleEventDrop = useCallback(
-        (eventId: string, newStart: Date, newEnd: Date, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string) => {
+        (eventId: string, newStart: Date, newEnd: Date, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string, isScheduledItem?: boolean, isTask?: boolean) => {
+            const normalizedId = eventId.replace(/^(task-|item-)/, '');
+            // Handle scheduled items/tasks differently
+            if (isScheduledItem) {
+                const oldScheduledAt = isTask
+                    ? useAppStore.getState().tasks.find(t => t.id === normalizedId)?.scheduled_at ?? null
+                    : useAppStore.getState().items.find(i => i.id === normalizedId)?.scheduled_at ?? null;
+                
+                if (isTask) {
+                    updateTask(normalizedId, { scheduled_at: newStart.toISOString() });
+                } else {
+                    updateItem(normalizedId, { scheduled_at: newStart.toISOString() });
+                }
+                // Undo toast
+                undoIdRef.current++;
+                setUndoAction({
+                    id: String(undoIdRef.current),
+                    message: `${isTask ? 'Task' : 'Item'} moved`,
+                    undoFn: () => {
+                        if (isTask) updateTask(normalizedId, { scheduled_at: oldScheduledAt });
+                        else updateItem(normalizedId, { scheduled_at: oldScheduledAt });
+                    },
+                });
+                return;
+            }
+
             if (isRecurrenceInstance) {
                 // Show the 3-option dialog
                 setRecurrenceDialog({
@@ -228,7 +280,7 @@ export function CalendarLayout() {
                     pendingData: { newStart, newEnd },
                 });
             } else {
-                // Check if this is a master (has rrule) — if so, show dialog for 'all' edit
+                // Check if this is a master (has rrule) â€” if so, show dialog for 'all' edit
                 const event = calendarEvents.find(e => e.id === eventId);
                 if (event?.rrule) {
                     setRecurrenceDialog({
@@ -237,15 +289,27 @@ export function CalendarLayout() {
                         pendingData: { newStart, newEnd },
                     });
                 } else {
-                    // Simple single event move
+                    // Simple single event move with undo
+                    const oldStart = event?.start_at;
+                    const oldEnd = event?.end_at;
                     updateEvent(eventId, {
                         start_at: newStart.toISOString(),
                         end_at: newEnd.toISOString(),
                     }, 'all');
+                    undoIdRef.current++;
+                    setUndoAction({
+                        id: String(undoIdRef.current),
+                        message: 'Event moved',
+                        undoFn: () => {
+                            if (oldStart && oldEnd) {
+                                updateEvent(eventId, { start_at: oldStart, end_at: oldEnd }, 'all');
+                            }
+                        },
+                    });
                 }
             }
         },
-        [updateEvent, calendarEvents]
+        [updateEvent, updateItem, updateTask, calendarEvents]
     );
 
     // Resize event (drag bottom/right edge to change end time)
@@ -268,14 +332,49 @@ export function CalendarLayout() {
                         pendingData: { newStart, newEnd },
                     });
                 } else {
+                    // Resize with undo
+                    const oldStart = event?.start_at;
+                    const oldEnd = event?.end_at;
                     updateEvent(eventId, {
                         start_at: newStart.toISOString(),
                         end_at: newEnd.toISOString(),
                     }, 'all');
+                    undoIdRef.current++;
+                    setUndoAction({
+                        id: String(undoIdRef.current),
+                        message: 'Event duration changed',
+                        undoFn: () => {
+                            if (oldStart && oldEnd) {
+                                updateEvent(eventId, { start_at: oldStart, end_at: oldEnd }, 'all');
+                            }
+                        },
+                    });
                 }
             }
         },
         [updateEvent, calendarEvents]
+    );
+
+    // Handle external items/tasks dropped from TasksPanel onto the calendar
+    const handleExternalDrop = useCallback(
+        (itemId: string, isTask: boolean, start: Date) => {
+            const normalizedId = itemId.replace(/^(task-|item-)/, '');
+            if (isTask) {
+                updateTask(normalizedId, { scheduled_at: start.toISOString() });
+            } else {
+                updateItem(normalizedId, { scheduled_at: start.toISOString() });
+            }
+            undoIdRef.current++;
+            setUndoAction({
+                id: String(undoIdRef.current),
+                message: `${isTask ? 'Task' : 'Item'} scheduled`,
+                undoFn: () => {
+                    if (isTask) updateTask(normalizedId, { scheduled_at: null });
+                    else updateItem(normalizedId, { scheduled_at: null });
+                },
+            });
+        },
+        [updateItem, updateTask]
     );
 
     const handleRecurrenceConfirm = useCallback(
@@ -329,7 +428,7 @@ export function CalendarLayout() {
                         }}>
                             Today
                         </button>
-                        {(['month', 'week', 'day'] as const).map(mode => (
+                        {(['month', 'week', 'day', 'agenda'] as const).map(mode => (
                             <button
                                 key={mode}
                                 onClick={() => setViewMode(mode)}
@@ -341,7 +440,7 @@ export function CalendarLayout() {
                                     textTransform: 'capitalize'
                                 }}
                             >
-                                {mode.charAt(0).toUpperCase()}
+                                {mode === 'agenda' ? 'S' : mode.charAt(0).toUpperCase()}
                             </button>
                         ))}
                     </div>
@@ -349,13 +448,14 @@ export function CalendarLayout() {
 
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                     <FullCalendarView
-                        viewMode={VIEW_MAP[viewMode]}
+                        viewMode={VIEW_MAP[viewMode === 'year' ? 'month' : viewMode]}
                         onEventClick={handleEventClick}
                         onDateSelect={handleDateSelect}
                         onEventDrop={handleEventDrop}
                         onEventResize={handleEventResize}
                         onEventDeleted={handleEventDeleted}
                         calendarRef={calendarRef}
+                        enabledCalendarIds={enabledCalendarIds}
                     />
                 </div>
                 <CalendarFAB selectedDate={selectedDate} />
@@ -414,7 +514,7 @@ export function CalendarLayout() {
 
                 <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ display: 'flex', gap: 4, background: 'var(--bg-app)', padding: 4, borderRadius: 8 }}>
-                        {(['month', 'week', 'day'] as const).map(mode => (
+                        {(['month', 'week', 'day', 'agenda', 'year'] as const).map(mode => (
                             <button
                                 key={mode}
                                 onClick={() => setViewMode(mode)}
@@ -427,14 +527,44 @@ export function CalendarLayout() {
                                     textTransform: 'capitalize'
                                 }}
                             >
-                                {mode}
+                                {mode === 'agenda' ? 'Schedule' : mode}
                             </button>
                         ))}
                     </div>
 
                     <div style={{ width: 1, height: 24, background: 'var(--border-light)', margin: '0 8px' }} />
 
-                    <button className={`icon-btn ${isEventsLoading ? 'rotating' : ''}`} onClick={() => loadEvents()} title="Refresh">
+                    {/* Search */}
+                    {isSearchOpen ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-app)', borderRadius: 8, padding: '2px 8px', border: '1px solid var(--border-light)' }}>
+                            <Search size={16} color="var(--text-secondary)" />
+                            <input
+                                ref={searchInputRef}
+                                type="text"
+                                placeholder="Search events..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, padding: '4px 0', width: 180, color: 'var(--text-primary)' }}
+                                onKeyDown={(e) => { if (e.key === 'Escape') { setIsSearchOpen(false); setSearchQuery(''); } }}
+                            />
+                            <button onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }} style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 2, display: 'flex' }}>
+                                <X size={14} color="var(--text-secondary)" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button className="icon-btn" onClick={() => { setIsSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 100); }} title="Search (/)">
+                            <Search size={18} />
+                        </button>
+                    )}
+
+                    <button
+                        className={`icon-btn ${isEventsLoading ? 'rotating' : ''}`}
+                        onClick={() => {
+                            loadEvents();
+                            void googleSyncEngine.syncNow('manual-refresh');
+                        }}
+                        title="Refresh"
+                    >
                         <RefreshCw size={18} />
                     </button>
                     
@@ -460,20 +590,76 @@ export function CalendarLayout() {
                         selectedDate={selectedDate}
                         onDateChange={handleSidebarDateChange}
                         onDateSelect={handleSidebarDateSelect}
+                        onCreateEvent={() => {
+                            const start = selectedDate || new Date();
+                            const end = new Date(start.getTime() + 3600000);
+                            addEvent({
+                                user_id: user?.id || 'demo',
+                                title: '', description: '',
+                                start_at: start.toISOString(), end_at: end.toISOString(),
+                                is_all_day: false, rrule: null,
+                                parent_event_id: null, recurring_event_id: null,
+                                is_deleted_instance: false, location: '', color_id: '7',
+                                visibility: 'default', transparency: 'opaque',
+                                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                                attendees: [], conference_data: null,
+                                reminders: [{ method: 'popup', minutes: 10 }],
+                                attachments: [],
+                                google_event_id: null, google_calendar_id: 'primary',
+                                deleted_at: null, is_unsynced: true,
+                            }).then(ev => requestAnimationFrame(() => openEventScheduler(ev.id)));
+                        }}
+                        onCreateTask={() => {
+                            useAppStore.getState().addTask({
+                                user_id: user?.id || 'demo',
+                                title: '',
+                                description: null,
+                                color: '#10B981',
+                                priority: 'none',
+                                scheduled_at: (selectedDate || new Date()).toISOString(),
+                                remind_before: null,
+                                recurring_config: null,
+                                item_ids: [],
+                                item_completion: {},
+                                is_completed: false,
+                            });
+                        }}
+                        onCalendarToggle={(enabledIds) => setEnabledCalendarIds(enabledIds)}
                     />
                 )}
 
-                {/* FullCalendar (Takes remaining width) */}
+                {/* FullCalendar (Takes remaining width) or Year View */}
                 <div className="gcal-grid-wrapper" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-                    <FullCalendarView
-                        viewMode={VIEW_MAP[viewMode]}
-                        onEventClick={handleEventClick}
-                        onDateSelect={handleDateSelect}
-                        onEventDrop={handleEventDrop}
-                        onEventResize={handleEventResize}
-                        onEventDeleted={handleEventDeleted}
-                        calendarRef={calendarRef}
-                    />
+                    {viewMode === 'year' ? (
+                        <CalendarYearView
+                            year={viewDate.getFullYear()}
+                            selectedDate={selectedDate}
+                            onDateClick={(date) => {
+                                setViewMode('day');
+                                setSelectedDate(date);
+                                const api = calendarRef.current?.getApi();
+                                if (api) {
+                                    requestAnimationFrame(() => {
+                                        api.gotoDate(date);
+                                        api.changeView('timeGridDay');
+                                    });
+                                    setViewDate(date);
+                                }
+                            }}
+                        />
+                    ) : (
+                        <FullCalendarView
+                            viewMode={VIEW_MAP[viewMode]}
+                            onEventClick={handleEventClick}
+                            onDateSelect={handleDateSelect}
+                            onEventDrop={handleEventDrop}
+                            onEventResize={handleEventResize}
+                            onEventDeleted={handleEventDeleted}
+                            onExternalDrop={handleExternalDrop}
+                            calendarRef={calendarRef}
+                            enabledCalendarIds={enabledCalendarIds}
+                        />
+                    )}
                 </div>
 
                 {/* Right Tasks Panel (Conditional Slide-in) */}

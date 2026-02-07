@@ -7,16 +7,17 @@
  * Reuses the same CSS as the existing SchedulerContent.
  */
 
-import { useState, useEffect } from 'react';
-import { X, Clock, Users, Video, MapPin, Calendar as CalIcon, AlignLeft, Bell, Globe } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Clock, Users, Video, MapPin, Calendar as CalIcon, AlignLeft, Bell, Globe, Paperclip, FileIcon, Trash2 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { GoogleClient, type GoogleCalendarListEntry } from '../../lib/googleClient';
+import { GoogleClient, isNoGoogleAccessTokenError, type GoogleCalendarListEntry } from '../../lib/googleClient';
 import { useGoogleAuth } from '../../hooks/useGoogleAuth';
-import type { CalendarEvent, RecurrenceEditMode } from '../../lib/types';
+import type { CalendarEvent, RecurrenceEditMode, EventAttachment } from '../../lib/types';
 import { RecurrenceEditDialog } from './RecurrenceEditDialog';
 import { CustomRecurrenceModal } from './CustomRecurrenceModal';
 import { GoogleConnectBanner } from '../ui/GoogleConnectBanner';
 import { GOOGLE_COLORS } from '../../lib/calendarConstants';
+import { uploadFile, deleteFile } from '../../lib/supabase';
 
 interface EventSchedulerContentProps {
     event: CalendarEvent;
@@ -67,6 +68,11 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
         { method: 'popup', minutes: 10 }
     ]);
 
+    // Attachments
+    const [attachments, setAttachments] = useState<EventAttachment[]>([]);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     // Recurrence edit dialog
     const [recurrenceDialogAction, setRecurrenceDialogAction] = useState<'edit' | 'delete' | null>(null);
 
@@ -76,7 +82,11 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
     // Fetch Google calendars
     useEffect(() => {
         if (hasGoogleAuth && !googleAuthLoading) {
-            GoogleClient.listCalendars().then(setCalendars).catch(console.error);
+            GoogleClient.listCalendars().then(setCalendars).catch((error) => {
+                if (!isNoGoogleAccessTokenError(error)) {
+                    console.error(error);
+                }
+            });
         }
     }, [hasGoogleAuth, googleAuthLoading]);
 
@@ -99,6 +109,10 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
 
             if (event.reminders?.length) {
                 setNotifications(event.reminders.map(r => ({ method: r.method as 'popup' | 'email', minutes: r.minutes })));
+            }
+
+            if (event.attachments?.length) {
+                setAttachments(event.attachments);
             }
 
             // Time
@@ -182,9 +196,14 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
                 visibility: visibility,
                 transparency: showAs === 'free' ? 'transparent' : 'opaque',
                 timezone,
-                attendees: attendees.map(email => ({ email, responseStatus: 'needsAction' })),
+                attendees: attendees.map(email => {
+                    // Preserve existing responseStatus if the attendee was already on the event
+                    const existing = event.attendees?.find(a => a.email.toLowerCase() === email.toLowerCase());
+                    return { email, responseStatus: existing?.responseStatus || 'needsAction', displayName: existing?.displayName };
+                }),
                 conference_data: addMeet ? { meetLink: 'pending', entryPoints: [] } : null,
                 reminders: notifications.map(n => ({ method: n.method, minutes: n.minutes })),
+                attachments,
                 google_calendar_id: calendarId !== 'primary' ? calendarId : undefined,
             };
 
@@ -412,6 +431,87 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
                             />
                         </div>
 
+                        {/* 6b. ATTACHMENTS */}
+                        <div className="grid-icon"><Paperclip size={20} /></div>
+                        <div className="grid-content">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                multiple
+                                style={{ display: 'none' }}
+                                onChange={async (e) => {
+                                    const files = e.target.files;
+                                    if (!files?.length) return;
+                                    setIsUploading(true);
+                                    const userId = useAppStore.getState().user?.id || 'demo';
+                                    const newAttachments: EventAttachment[] = [];
+                                    for (const file of Array.from(files)) {
+                                        try {
+                                            const { generateId } = await import('../../lib/utils');
+                                            const result = await uploadFile(file, userId, 'file');
+                                            newAttachments.push({
+                                                id: generateId(),
+                                                name: file.name,
+                                                url: result.url,
+                                                storagePath: result.path,
+                                                type: file.type,
+                                                size: file.size,
+                                            });
+                                        } catch (err) {
+                                            console.error('Upload failed:', err);
+                                        }
+                                    }
+                                    setAttachments(prev => [...prev, ...newAttachments]);
+                                    setIsUploading(false);
+                                    e.target.value = '';
+                                }}
+                            />
+                            {attachments.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                                    {attachments.map(att => (
+                                        <div key={att.id} style={{
+                                            display: 'flex', alignItems: 'center', gap: 8,
+                                            padding: '6px 10px', borderRadius: 8,
+                                            background: 'var(--bg-app)', border: '1px solid var(--border-light)',
+                                            fontSize: 13,
+                                        }}>
+                                            <FileIcon size={14} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
+                                            <a
+                                                href={att.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--accent, #1a73e8)', textDecoration: 'none' }}
+                                            >
+                                                {att.name}
+                                            </a>
+                                            <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
+                                                {att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(1)}KB` : `${(att.size / 1048576).toFixed(1)}MB`}
+                                            </span>
+                                            <button
+                                                className="icon-btn-small"
+                                                title="Remove attachment"
+                                                onClick={async () => {
+                                                    try { await deleteFile(att.storagePath); } catch { /* ignore */ }
+                                                    setAttachments(prev => prev.filter(a => a.id !== att.id));
+                                                }}
+                                            >
+                                                <Trash2 size={13} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            <button
+                                className="meet-chip"
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading}
+                                style={{ opacity: isUploading ? 0.6 : 1 }}
+                            >
+                                <Paperclip size={16} />
+                                {isUploading ? 'Uploading...' : 'Add attachment'}
+                            </button>
+                        </div>
+
                         {/* 7. CALENDAR & COLOR */}
                         <div className="grid-icon"><CalIcon size={20} /></div>
                         <div className="grid-content">
@@ -429,7 +529,7 @@ export function EventSchedulerContent({ event, originalStart, onClose }: EventSc
                                     </span>
                                     <div className="color-picker-trigger" title="Change color">
                                         <select className="hidden-select" value={colorId} onChange={e => setColorId(e.target.value)}>
-                                            {GOOGLE_COLORS.map(c => <option key={c.id} value={c.id}>Color {c.id}</option>)}
+                                            {GOOGLE_COLORS.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                         </select>
                                     </div>
                                 </div>

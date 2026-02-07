@@ -75,6 +75,14 @@ export const tombstoneManager = {
         return loadEntries().some(e => e.id === id && e.ts > Date.now() - TTL_MS);
     },
 
+    remove(id: string): void {
+        const entries = removeExpired(loadEntries());
+        const next = entries.filter(e => e.id !== id);
+        if (next.length !== entries.length) {
+            saveEntries(next);
+        }
+    },
+
     /**
      * Remove tombstones for IDs that the server no longer returns
      * (i.e., the server has fully processed the delete).

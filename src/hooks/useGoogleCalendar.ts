@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { startOfMonth, startOfWeek, isSameDay, isWithinInterval, startOfDay } from 'date-fns';
 import { useAppStore } from '../store/useAppStore';
-import { GoogleClient, type GoogleEvent, type GoogleTask } from '../lib/googleClient';
+import { GoogleClient, isNoGoogleAccessTokenError, type GoogleEvent, type GoogleTask } from '../lib/googleClient';
 import { hasStoredGoogleConnection } from '../lib/googleTokenService';
 import type { Item, Task, EventContent } from '../lib/types';
 
@@ -72,9 +72,11 @@ export function useGoogleCalendar(viewDate: Date) {
             console.log('[useGoogleCalendar] Fetched', fetchedTasks.length, 'Google tasks');
             setGoogleTasks(fetchedTasks);
 
-        } catch (err: any) {
-            console.error('[useGoogleCalendar] Fetch failed:', err);
-            setError(err.message);
+        } catch (err: unknown) {
+            if (!isNoGoogleAccessTokenError(err)) {
+                console.error('[useGoogleCalendar] Fetch failed:', err);
+            }
+            setError(err instanceof Error ? err.message : 'Google calendar fetch failed');
         } finally {
             setIsLoading(false);
         }

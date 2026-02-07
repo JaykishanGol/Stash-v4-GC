@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { AppState } from '../types';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { generateId } from '../../lib/utils';
 import type {
     ActiveView,
@@ -242,6 +242,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     clearFilters: () => set({ filters: { type: null, priority: null }, searchQuery: '' }),
 
     fetchNotifications: async () => {
+        if (!isSupabaseConfigured()) return;
         // Clean up notifications older than 30 days server-side
         await supabase
             .from('notifications')
@@ -284,9 +285,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
             notifications: [notification, ...state.notifications]
         }));
 
-        // 2. Persist to DB (if authenticated)
+        // 2. Persist to DB (if authenticated and Supabase is configured)
         const { user } = get();
-        if (user && user.id !== 'demo') {
+        if (user && user.id !== 'demo' && isSupabaseConfigured()) {
             try {
                 await supabase.from('notifications').insert({
                     id: notification.id,
@@ -307,21 +308,24 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         set((state) => ({
             notifications: state.notifications.map(n => n.id === id ? { ...n, read: true } : n)
         }));
-        await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+        if (isSupabaseConfigured()) {
+            await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+        }
     },
 
     clearNotifications: async () => {
         set({ notifications: [] });
-        // Optional: Delete from DB or just mark all read? Usually delete or just clear local view.
-        // Let's mark all as read for now, or delete? The UI says "Clear".
-        // Let's actually delete.
-        await supabase.from('notifications').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all for user (via RLS)
+        if (isSupabaseConfigured()) {
+            await supabase.from('notifications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        }
     },
 
     markAllNotificationsRead: async () => {
         set((state) => ({
             notifications: state.notifications.map(n => ({ ...n, read: true }))
         }));
-        await supabase.from('notifications').update({ is_read: true }).neq('id', '00000000-0000-0000-0000-000000000000');
+        if (isSupabaseConfigured()) {
+            await supabase.from('notifications').update({ is_read: true }).neq('id', '00000000-0000-0000-0000-000000000000');
+        }
     },
 });

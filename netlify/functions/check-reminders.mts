@@ -10,13 +10,13 @@ if (vapidPublicKey && vapidPrivateKey) {
     webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 }
 
-// Supabase client with service role (bypasses RLS)
+// Supabase credentials — client created inside handler to avoid cold-start issues
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
 export default async (req, context) => {
+    // Create client inside handler to ensure fresh connection per invocation
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
     console.log('[check-reminders] Scheduled function started at:', new Date().toISOString());
 
     if (!vapidPublicKey || !vapidPrivateKey) {
@@ -193,32 +193,34 @@ export default async (req, context) => {
                     requireInteraction: item.priority === 'high'
                 });
 
-                // Send to all user's subscriptions
-                for (const sub of subscriptions) {
-                    const pushSubscription = {
-                        endpoint: sub.endpoint,
-                        keys: {
-                            p256dh: sub.p256dh,
-                            auth: sub.auth
-                        }
-                    };
+                // Send to all user's subscriptions in parallel
+                const pushResults = await Promise.allSettled(
+                    subscriptions.map(async (sub) => {
+                        const pushSubscription = {
+                            endpoint: sub.endpoint,
+                            keys: {
+                                p256dh: sub.p256dh,
+                                auth: sub.auth
+                            }
+                        };
 
-                    try {
-                        await webpush.sendNotification(pushSubscription, payload);
-                        console.log(`[check-reminders] Sent notification for "${item.title}" to ${sub.endpoint.slice(-20)}`);
-                    } catch (pushError) {
-                        console.error(`[check-reminders] Push failed:`, pushError.message);
+                        try {
+                            await webpush.sendNotification(pushSubscription, payload);
+                            console.log(`[check-reminders] Sent notification for "${item.title}" to ${sub.endpoint.slice(-20)}`);
+                        } catch (pushError) {
+                            console.error(`[check-reminders] Push failed:`, pushError.message);
 
-                        // Remove invalid subscription
-                        if (pushError.statusCode === 410 || pushError.statusCode === 404) {
-                            await supabase
-                                .from('push_subscriptions')
-                                .delete()
-                                .eq('endpoint', sub.endpoint);
-                            console.log('[check-reminders] Removed invalid subscription');
+                            // Remove invalid subscription
+                            if (pushError.statusCode === 410 || pushError.statusCode === 404) {
+                                await supabase
+                                    .from('push_subscriptions')
+                                    .delete()
+                                    .eq('endpoint', sub.endpoint);
+                                console.log('[check-reminders] Removed invalid subscription');
+                            }
                         }
-                    }
-                }
+                    })
+                );
 
                 // Update last_acknowledged_at to prevent duplicate notifications
                 const table = item.type === 'task' ? 'tasks' : 'items';

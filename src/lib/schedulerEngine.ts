@@ -92,32 +92,24 @@ export function calculateNextOccurrence(
         }
 
         case 'monthly': {
-            // Add months
-            // Logic to handle "Month overflow" (e.g. Jan 31 + 1 month = Feb 28/29)
-            // Javascript's setMonth handles overflow by pushing to next month (March 2/3), which is usually NOT desired for "Monthly" recurrence.
-            // We usually want "Last day of month" if overflow.
+            // Add months safely to avoid JS Date overflow
+            // e.g. Jan 31 + 1 month should give Feb 28/29, not March 2/3
             
             const desiredDay = config.byMonthDay || potentialDate.getDate();
             
-            // First, add the months
+            // Step 1: Set to day 1 to prevent overflow when changing month
+            potentialDate.setDate(1);
+            
+            // Step 2: Add the months
             potentialDate.setMonth(potentialDate.getMonth() + interval);
             
-            // Now check if the day matches. 
-            // If we wanted the 31st, but setMonth gave us March 2nd (because Feb only has 28 days), rollback.
-            if (potentialDate.getDate() !== desiredDay) {
-                // We overflowed. Set to last day of previous month (which is the target month).
-                potentialDate.setDate(0); 
-            } else {
-                // We didn't overflow, but we might want to enforce specific day
-                potentialDate.setDate(desiredDay);
-            }
+            // Step 3: Find the number of days in the target month
+            const targetYear = potentialDate.getFullYear();
+            const targetMonth = potentialDate.getMonth();
+            const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
             
-            // Double check overflow again after setting date (edge case Feb 30 -> Feb 28)
-             const checkMonth = new Date(potentialDate);
-             checkMonth.setDate(1); // normalized
-             // (Logic is complex here, simplified: relying on JS Date auto-correction usually "works" enough for MVP, 
-             // but strictly: if byMonthDay=31, and next month is Feb, JS gives Mar 3. We want Feb 28.)
-             // The above `setDate(0)` trick handles the "Last day" fallback.
+            // Step 4: Set to desired day or last day of month if it would overflow
+            potentialDate.setDate(Math.min(desiredDay, daysInTargetMonth));
             break;
         }
 

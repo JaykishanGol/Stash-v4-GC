@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { CheckCircle2, Circle } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import type { CalendarEntry } from '../../hooks/useGoogleCalendar';
-import { GoogleSyncService } from '../../lib/googleSyncService';
 import { GoogleEventDetail } from './GoogleEventDetail';
 
 interface CalendarWeekViewProps {
@@ -72,22 +71,8 @@ export function CalendarWeekView({ viewDate, mode = 'week', onSelectDate, getEnt
         // For tasks, we also update scheduled_at
         if (itemType === 'task') {
             updateTask(itemId, updates);
-
-            // Seamless Sync
-            const { tasks } = useAppStore.getState();
-            const updatedTask = { ...tasks.find(t => t.id === itemId), ...updates };
-            GoogleSyncService.syncToGoogleTask(updatedTask, { dueDate: isoDate });
         } else {
             updateItem(itemId, updates);
-
-            // Seamless Sync (Try both Event and Task since we don't know which one it is yet)
-            const { items } = useAppStore.getState();
-            const updatedItem = { ...items.find(i => i.id === itemId), ...updates };
-            // Naive "Try Sync" - ideally we check links first, but this is okay for "Update if exists" logic
-            GoogleSyncService.syncToGoogleEvent(updatedItem, {
-                start: isoDate,
-                end: new Date(newDate.getTime() + 3600000).toISOString() // Default 1h duration
-            });
         }
     };
 

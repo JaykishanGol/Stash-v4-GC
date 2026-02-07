@@ -362,11 +362,11 @@ export function MainCanvas() {
                             {isTrashView ? 'Trash' : (hasFilters ? 'Search Results' : (activeView === 'home' ? 'Recent Items' : getViewTitle()))}
                             <span style={{ fontSize: '0.75rem', color: '#6B7280', marginLeft: 8 }}>({displayItems.length})</span>
                         </h3>
-                        <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 8, border: '1px solid #E5E7EB' }}>
-                            <button onClick={() => setViewMode('grid')} style={{ display: 'flex', padding: 6, borderRadius: 6, background: viewMode === 'grid' ? '#F3F4F6' : 'transparent', border: 'none', cursor: 'pointer' }}>
+                        <div className="view-mode-toggle" style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 8, border: '1px solid #E5E7EB' }}>
+                            <button onClick={() => setViewMode('grid')} className={viewMode === 'grid' ? 'active' : ''} aria-label="Grid view" style={{ display: 'flex', padding: 6, borderRadius: 6, background: viewMode === 'grid' ? '#F3F4F6' : 'transparent', border: 'none', cursor: 'pointer' }}>
                                 <LayoutGrid size={18} color={viewMode === 'grid' ? '#1f2937' : '#9CA3AF'} />
                             </button>
-                            <button onClick={() => setViewMode('list')} style={{ display: 'flex', padding: 6, borderRadius: 6, background: viewMode === 'list' ? '#F3F4F6' : 'transparent', border: 'none', cursor: 'pointer' }}>
+                            <button onClick={() => setViewMode('list')} className={viewMode === 'list' ? 'active' : ''} style={{ display: 'flex', padding: 6, borderRadius: 6, background: viewMode === 'list' ? '#F3F4F6' : 'transparent', border: 'none', cursor: 'pointer' }}>
                                 <ListIcon size={18} color={viewMode === 'list' ? '#1f2937' : '#9CA3AF'} />
                             </button>
                         </div>

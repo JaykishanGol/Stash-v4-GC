@@ -24,6 +24,12 @@ export interface ChecklistItem {
   checked: boolean;
 }
 
+export interface ItemGoogleSyncMeta {
+  google_sync_target?: 'event' | 'task' | null;
+  google_sync_task_list_id?: string | null;
+  google_sync_calendar_id?: string | null;
+}
+
 export interface LinkContent {
   url: string;
   title?: string;
@@ -70,7 +76,7 @@ export interface Item {
   folder_id: string | null;
   type: ItemType;
   title: string;
-  content: NoteContent | LinkContent | FolderContent | EventContent | Record<string, unknown>;
+  content: (NoteContent | LinkContent | FolderContent | EventContent | Record<string, unknown>) & ItemGoogleSyncMeta;
   file_meta: FileMeta | null;
   priority: PriorityLevel;
   tags: string[];
@@ -152,6 +158,15 @@ export interface EventConferenceData {
   entryPoints?: { entryPointType: string; uri: string; label?: string }[];
 }
 
+export interface EventAttachment {
+  id: string;
+  name: string;
+  url: string;
+  storagePath: string;
+  type: string;   // MIME type
+  size: number;   // bytes
+}
+
 export interface CalendarEvent {
   id: string;
   user_id: string;
@@ -182,10 +197,13 @@ export interface CalendarEvent {
   attendees: EventAttendee[];
   conference_data: EventConferenceData | null;
   reminders: EventReminder[];
+  attachments: EventAttachment[];
 
   // Google Sync
   google_event_id: string | null;
   google_calendar_id: string;
+  google_etag?: string | null;
+  remote_updated_at?: string | null;
 
   // Metadata
   created_at: string;
@@ -201,6 +219,8 @@ export interface Task {
   id: string;
   user_id: string;
   list_id: string | null;
+  parent_task_id?: string | null;
+  sort_position?: string | null;
   title: string;
   description: string | null;
   color: string;
@@ -214,6 +234,9 @@ export interface Task {
   item_ids: string[];
   item_completion: Record<string, boolean>;
   is_completed: boolean;
+  google_etag?: string | null;
+  remote_updated_at?: string | null;
+  is_unsynced?: boolean;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -353,8 +376,9 @@ export function isFileMeta(meta: unknown): meta is FileMeta {
  */
 export function isEventContent(content: unknown): content is EventContent {
   if (!content || typeof content !== 'object') return false;
-  // EventContent is flexible - just check it's an object
-  return true;
+  const c = content as Record<string, unknown>;
+  // Must have start_at and end_at to be valid EventContent
+  return typeof c.start_at === 'string' && typeof c.end_at === 'string';
 }
 
 export function isValidItemType(type: unknown): type is ItemType {

@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import { supabase } from '../../lib/supabase';
 import { clearSignedUrlCache } from '../../components/cards/ItemCard';
 import { STORAGE_KEY } from '../../lib/constants';
+import { tombstoneManager } from '../../lib/tombstones';
 import type { AppState } from '../types';
 
 export interface AuthSlice {
@@ -27,7 +28,11 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
   closeAuthModal: () => set({ isAuthModalOpen: false }),
   setLoading: (loading) => set({ isLoading: loading }),
   signOut: async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('[Auth] signOut network error (continuing local cleanup):', err);
+    }
     set({ user: null });
     
     // Clear all user data from the store (typed access to DataSlice)
@@ -42,6 +47,11 @@ export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set, 
     // Clear persisted localStorage to prevent data rehydration
     localStorage.removeItem(STORAGE_KEY);
     
-    console.log('[Auth] Signed out and cleared all user data');
+    // Clear sync queue and tombstones to prevent cross-user data leaks
+    localStorage.removeItem('stash_sync_queue');
+    localStorage.removeItem('stash_sync_stats');
+    tombstoneManager.clear();
+    
+    console.log('[Auth] Signed out and cleared all user data, queue, and tombstones');
   },
 });

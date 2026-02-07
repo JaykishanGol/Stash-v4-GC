@@ -1,4 +1,4 @@
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, useEditorState } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
@@ -11,9 +11,30 @@ interface RichTextEditorProps {
     onChange: (html: string) => void;
     placeholder?: string;
     autoFocus?: boolean;
+    showChecklistModeToggle?: boolean;
+    onToggleChecklistMode?: () => void;
+    isChecklistMode?: boolean;
 }
 
-export function RichTextEditor({ content, onChange, placeholder = 'Write your note...', autoFocus }: RichTextEditorProps) {
+const DEFAULT_FORMATTING = {
+    bold: false,
+    italic: false,
+    code: false,
+    heading1: false,
+    heading2: false,
+    bulletList: false,
+    orderedList: false,
+};
+
+export function RichTextEditor({
+    content,
+    onChange,
+    placeholder = 'Write your note...',
+    autoFocus,
+    showChecklistModeToggle = false,
+    onToggleChecklistMode,
+    isChecklistMode = false,
+}: RichTextEditorProps) {
     const editor = useEditor({
         extensions: [
             StarterKit.configure({
@@ -41,6 +62,26 @@ export function RichTextEditor({ content, onChange, placeholder = 'Write your no
         },
     });
 
+    const activeFormatting = useEditorState({
+        editor,
+        selector: ({ editor }) => {
+            if (!editor) {
+                return DEFAULT_FORMATTING;
+            }
+            const marks = editor.state.storedMarks ?? editor.state.selection.$from.marks();
+            const hasMark = (markName: string) => marks.some((mark) => mark.type.name === markName);
+            return {
+                bold: editor.isActive('bold') || hasMark('bold'),
+                italic: editor.isActive('italic') || hasMark('italic'),
+                code: editor.isActive('code') || hasMark('code'),
+                heading1: editor.isActive('heading', { level: 1 }),
+                heading2: editor.isActive('heading', { level: 2 }),
+                bulletList: editor.isActive('bulletList'),
+                orderedList: editor.isActive('orderedList'),
+            };
+        },
+    }) ?? DEFAULT_FORMATTING;
+
     // FIX: Sync content prop with editor when editing existing notes
     // The useEditor `content` only works on initial render
     useEffect(() => {
@@ -58,63 +99,89 @@ export function RichTextEditor({ content, onChange, placeholder = 'Write your no
             {/* Fixed Toolbar at top */}
             <div className="editor-toolbar">
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleBold().run()}
-                    className={editor.isActive('bold') ? 'is-active' : ''}
-                    title="Bold (Ctrl+B)"
+                    className={activeFormatting.bold ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.bold}
+                    title="Bold (Ctrl/Cmd+B)"
+                    aria-label="Bold"
                 >
                     <Bold size={16} />
                 </button>
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleItalic().run()}
-                    className={editor.isActive('italic') ? 'is-active' : ''}
-                    title="Italic (Ctrl+I)"
+                    className={activeFormatting.italic ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.italic}
+                    title="Italic (Ctrl/Cmd+I)"
+                    aria-label="Italic"
                 >
                     <Italic size={16} />
                 </button>
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleCode().run()}
-                    className={editor.isActive('code') ? 'is-active' : ''}
-                    title="Code"
+                    className={activeFormatting.code ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.code}
+                    title="Code (Ctrl/Cmd+E)"
+                    aria-label="Code"
                 >
                     <Code size={16} />
                 </button>
                 <div className="toolbar-divider" />
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-                    className={editor.isActive('heading', { level: 1 }) ? 'is-active' : ''}
+                    className={activeFormatting.heading1 ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.heading1}
                     title="Heading 1"
+                    aria-label="Heading 1"
                 >
                     <Heading1 size={16} />
                 </button>
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-                    className={editor.isActive('heading', { level: 2 }) ? 'is-active' : ''}
+                    className={activeFormatting.heading2 ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.heading2}
                     title="Heading 2"
+                    aria-label="Heading 2"
                 >
                     <Heading2 size={16} />
                 </button>
                 <div className="toolbar-divider" />
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleBulletList().run()}
-                    className={editor.isActive('bulletList') ? 'is-active' : ''}
-                    title="Bullet List"
+                    className={activeFormatting.bulletList ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.bulletList}
+                    title="Bullet List (Ctrl/Cmd+Shift+8)"
+                    aria-label="Bullet list"
                 >
                     <List size={16} />
                 </button>
                 <button
+                    type="button"
                     onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                    className={editor.isActive('orderedList') ? 'is-active' : ''}
-                    title="Numbered List"
+                    className={activeFormatting.orderedList ? 'is-active' : ''}
+                    aria-pressed={activeFormatting.orderedList}
+                    title="Numbered List (Ctrl/Cmd+Shift+7)"
+                    aria-label="Numbered list"
                 >
                     <ListOrdered size={16} />
                 </button>
-                <button
-                    onClick={() => editor.chain().focus().toggleTaskList().run()}
-                    className={editor.isActive('taskList') ? 'is-active' : ''}
-                    title="Checklist"
-                >
-                    <CheckSquare size={16} />
-                </button>
+                {showChecklistModeToggle && (
+                    <button
+                        type="button"
+                        onClick={onToggleChecklistMode}
+                        className={isChecklistMode ? 'is-active checklist-mode-btn' : 'checklist-mode-btn'}
+                        aria-pressed={isChecklistMode}
+                        title="Checklist mode (Ctrl/Cmd+Shift+K)"
+                        aria-label="Checklist mode"
+                    >
+                        <CheckSquare size={16} />
+                    </button>
+                )}
             </div>
 
             {/* Editor Content */}
@@ -197,6 +264,8 @@ export function RichTextEditor({ content, onChange, placeholder = 'Write your no
                 
                 .editor-toolbar {
                     display: flex;
+                    align-items: center;
+                    flex-wrap: wrap;
                     gap: 4px;
                     padding: 8px 12px;
                     border-top: 1px solid var(--border-light);
@@ -205,7 +274,7 @@ export function RichTextEditor({ content, onChange, placeholder = 'Write your no
                 }
                 .editor-toolbar button {
                     padding: 6px;
-                    border: none;
+                    border: 1px solid transparent;
                     background: transparent;
                     border-radius: 4px;
                     cursor: pointer;
@@ -213,20 +282,52 @@ export function RichTextEditor({ content, onChange, placeholder = 'Write your no
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    min-width: 32px;
+                    min-height: 32px;
                     transition: all 0.15s;
                 }
                 .editor-toolbar button:hover {
-                    background: var(--bg-hover);
+                    background: var(--bg-hover, rgba(31, 41, 55, 0.08));
                     color: var(--text-primary);
+                    border-color: var(--border-light);
                 }
                 .editor-toolbar button.is-active {
                     background: var(--accent-light);
                     color: var(--accent);
+                    border-color: var(--accent);
+                    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.15);
+                }
+                .editor-toolbar button:focus-visible {
+                    outline: none;
+                    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
                 }
                 .toolbar-divider {
                     width: 1px;
                     background: var(--border-light);
                     margin: 0 4px;
+                    align-self: stretch;
+                }
+                .checklist-mode-btn {
+                    margin-left: 2px;
+                }
+                @media (max-width: 768px) {
+                    .editor-toolbar {
+                        flex-wrap: nowrap;
+                        overflow-x: auto;
+                        gap: 6px;
+                        padding: 8px 10px;
+                        scrollbar-width: thin;
+                    }
+                    .editor-toolbar button {
+                        min-width: 36px;
+                        min-height: 36px;
+                        flex: 0 0 auto;
+                    }
+                    .toolbar-divider {
+                        flex: 0 0 1px;
+                        height: 24px;
+                        align-self: center;
+                    }
                 }
 
                 .bubble-menu {

@@ -20,7 +20,12 @@
 
 import { supabase } from './supabase';
 
-const REFRESH_ENDPOINT = '/.netlify/functions/refresh-google-token';
+const REFRESH_ENDPOINT =
+    import.meta.env.VITE_GOOGLE_REFRESH_ENDPOINT || '/.netlify/functions/refresh-google-token';
+const REFRESH_ENDPOINT_RETRY_MS = 5 * 60 * 1000;
+let refreshEndpointUnavailableUntil = 0;
+let refreshEndpointWarned = false;
+let refreshInFlight: Promise<string | null> | null = null;
 
 /**
  * Store the Google refresh token after OAuth callback
@@ -72,56 +77,84 @@ export async function getStoredRefreshToken(): Promise<string | null> {
  * Exchange refresh token for new access token via Netlify function
  */
 export async function refreshGoogleAccessToken(refreshToken: string): Promise<string | null> {
-    try {
-        const response = await fetch(REFRESH_ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-        });
+    if (Date.now() < refreshEndpointUnavailableUntil) {
+        return null;
+    }
 
-        // Handle 404 (Netlify function not available in local dev)
-        if (response.status === 404) {
-            console.warn('[GoogleTokenService] Refresh endpoint not found (local dev?). Skipping.');
-            return null;
-        }
+    if (refreshInFlight) {
+        return refreshInFlight;
+    }
 
-        if (!response.ok) {
-            // Safely parse error body — may be HTML or empty
-            let errorData: any = {};
-            try {
-                const text = await response.text();
-                if (text) errorData = JSON.parse(text);
-            } catch {
-                // Body wasn't JSON — ignore
-            }
+    refreshInFlight = (async () => {
+        try {
+            const response = await fetch(REFRESH_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
 
-            // If token is revoked, clear it from DB
-            if (errorData.requiresReauth) {
-                console.warn('[GoogleTokenService] Token revoked, clearing stored token');
-                await clearGoogleConnection();
+            // Handle 404 (Netlify function not available in local dev)
+            if (response.status === 404) {
+                refreshEndpointUnavailableUntil = Date.now() + REFRESH_ENDPOINT_RETRY_MS;
+                if (!refreshEndpointWarned) {
+                    refreshEndpointWarned = true;
+                    console.warn(
+                        `[GoogleTokenService] Refresh endpoint not found at "${REFRESH_ENDPOINT}". ` +
+                        'Token refresh disabled temporarily (run netlify dev or set VITE_GOOGLE_REFRESH_ENDPOINT).'
+                    );
+                }
                 return null;
             }
 
-            throw new Error(errorData.error || `Token refresh failed (${response.status})`);
-        }
+            refreshEndpointUnavailableUntil = 0;
+            refreshEndpointWarned = false;
 
-        // Safely parse success body
-        const text = await response.text();
-        if (!text) {
-            console.warn('[GoogleTokenService] Empty response body from refresh endpoint');
+            if (!response.ok) {
+                // Safely parse error body - may be HTML or empty
+                let errorData: { error?: string; requiresReauth?: boolean } = {};
+                try {
+                    const text = await response.text();
+                    if (text) {
+                        const parsed = JSON.parse(text) as { error?: string; requiresReauth?: boolean };
+                        errorData = parsed;
+                    }
+                } catch {
+                    // Body wasn't JSON - ignore
+                }
+
+                // If token is revoked, clear it from DB
+                if (errorData.requiresReauth) {
+                    console.warn('[GoogleTokenService] Token revoked, clearing stored token');
+                    await clearGoogleConnection();
+                    return null;
+                }
+
+                throw new Error(errorData.error || `Token refresh failed (${response.status})`);
+            }
+
+            // Safely parse success body
+            const text = await response.text();
+            if (!text) {
+                console.warn('[GoogleTokenService] Empty response body from refresh endpoint');
+                return null;
+            }
+
+            const data = JSON.parse(text);
+            console.log('[GoogleTokenService] Token refreshed, expires in:', data.expires_in, 'seconds');
+
+            return data.access_token;
+        } catch (error) {
+            console.error('[GoogleTokenService] Refresh failed:', error);
             return null;
         }
+    })();
 
-        const data = JSON.parse(text);
-        console.log('[GoogleTokenService] Token refreshed, expires in:', data.expires_in, 'seconds');
-
-        return data.access_token;
-    } catch (error) {
-        console.error('[GoogleTokenService] Refresh failed:', error);
-        return null;
+    try {
+        return await refreshInFlight;
+    } finally {
+        refreshInFlight = null;
     }
 }
-
 /**
  * Clear Google connection (used when token is revoked)
  */
@@ -145,29 +178,21 @@ export async function clearGoogleConnection(): Promise<void> {
  */
 export async function hasStoredGoogleConnection(): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-        console.log('[GoogleTokenService] hasStoredGoogleConnection: No user');
-        return false;
-    }
+    if (!user) return false;
 
     const { data, error } = await supabase
         .from('user_settings')
-        .select('google_refresh_token, is_google_connected')
+        .select('google_refresh_token')
         .eq('user_id', user.id)
         .single();
 
-    if (error) {
-        console.log('[GoogleTokenService] hasStoredGoogleConnection: DB error', error.message);
-        return false;
-    }
+    if (error) return false;
 
     const hasToken = !!data?.google_refresh_token;
-    const isConnected = data?.is_google_connected === true;
-
-    console.log('[GoogleTokenService] hasStoredGoogleConnection:', { hasToken, isConnected });
 
     // ONLY return true if we have an actual refresh token stored in the database
     // The is_google_connected flag alone is not sufficient - it may have been
     // set before OAuth completed, or the token could have been revoked
     return hasToken;
 }
+
