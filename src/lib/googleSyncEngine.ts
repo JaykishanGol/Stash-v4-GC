@@ -528,6 +528,15 @@ class GoogleSyncEngine {
     calendarId: string,
     remote: GoogleEvent
   ) {
+    // Delete stale links FIRST (before upsert) to avoid 409
+    // on the (user_id, local_id, resource_type, local_type) unique constraint.
+    await supabase
+      .from('google_resource_links')
+      .delete()
+      .eq('local_id', event.id)
+      .eq('resource_type', 'event')
+      .neq('google_id', remote.id);
+
     await this.upsertLink({
       user_id: userId,
       local_id: event.id,
@@ -539,14 +548,6 @@ class GoogleSyncEngine {
       remote_updated_at: remote.updated || null,
       direction: 'push',
     });
-
-    await supabase
-      .from('google_resource_links')
-      .delete()
-      .eq('local_id', event.id)
-      .eq('resource_type', 'event')
-      .eq('calendar_id', calendarId)
-      .neq('google_id', remote.id);
 
     await this.patchLocalEvent(event.id, {
       google_event_id: remote.id,
@@ -647,13 +648,32 @@ class GoogleSyncEngine {
    * the (now-dropped) events_updated_at trigger. Finds entities where
    * remote_updated_at is known but updated_at has drifted, and marks
    * them is_unsynced so the next pull/push corrects them.
+   *
+   * IMPORTANT: This runs at most ONCE per device (persisted via
+   * localStorage) and caps at MAX_RECONCILE_PER_CYCLE entities to
+   * prevent sync storms that create duplicate Google resources.
    */
+  private static readonly RECONCILE_STORAGE_KEY = 'stash_reconcile_done_v2';
+  private static readonly MAX_RECONCILE_PER_CYCLE = 10;
+
   private async reconcileTimestampDrift(userId: string) {
+    // Only run this once EVER per device (persisted). It was a one-time
+    // migration helper and mass-marking entities is_unsynced caused
+    // catastrophic duplicate creation on Google Calendar/Tasks.
+    try {
+      const done = localStorage.getItem(GoogleSyncEngine.RECONCILE_STORAGE_KEY);
+      if (done) {
+        console.info('[GoogleSyncEngine] Timestamp drift reconciliation already completed, skipping.');
+        return;
+      }
+    } catch { /* localStorage unavailable, proceed */ }
+
     const links = await this.getAllLinks(userId);
     const state = useAppStore.getState();
     let driftCount = 0;
 
     for (const link of links) {
+      if (driftCount >= GoogleSyncEngine.MAX_RECONCILE_PER_CYCLE) break;
       if (!link.remote_updated_at) continue;
 
       if (link.local_type === 'calendar_event') {
@@ -700,8 +720,13 @@ class GoogleSyncEngine {
     }
 
     if (driftCount > 0) {
-      console.info(`[GoogleSyncEngine] Reconciled ${driftCount} timestamp-drifted entities for user ${userId}.`);
+      console.info(`[GoogleSyncEngine] Reconciled ${driftCount} timestamp-drifted entities for user ${userId} (capped at ${GoogleSyncEngine.MAX_RECONCILE_PER_CYCLE}).`);
     }
+
+    // Mark as done globally so this never runs again
+    try {
+      localStorage.setItem(GoogleSyncEngine.RECONCILE_STORAGE_KEY, Date.now().toString());
+    } catch { /* localStorage unavailable */ }
   }
 
   private async migrateLegacyEventItems(userId: string) {
@@ -893,6 +918,19 @@ class GoogleSyncEngine {
     remote_updated_at?: string | null;
     direction: SyncDirection;
   }) {
+    // Delete any existing link for this entity+type that points to a DIFFERENT
+    // google_id. This prevents 409 conflicts on the
+    // (user_id, local_id, resource_type, local_type) unique index when the
+    // google_id has changed (e.g. after 404 re-create).
+    await supabase
+      .from('google_resource_links')
+      .delete()
+      .eq('user_id', input.user_id)
+      .eq('local_id', input.local_id)
+      .eq('resource_type', input.resource_type)
+      .eq('local_type', input.local_type)
+      .neq('google_id', input.google_id);
+
     const payload = {
       user_id: input.user_id,
       local_id: input.local_id,
