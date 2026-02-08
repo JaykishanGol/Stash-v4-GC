@@ -303,6 +303,7 @@ function getRemoteTaskUpdatedAt(remote: GoogleTask) {
 }
 
 class GoogleSyncEngine {
+  private static readonly SYNC_KILL_SWITCH_KEY = 'stash_google_sync_disabled';
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private intervalTimer: ReturnType<typeof setInterval> | null = null;
   private syncing = false;
@@ -318,6 +319,42 @@ class GoogleSyncEngine {
   private rateLimitUnavailableUntil = 0;
   private rateLimitBackoffMs = GOOGLE_RATE_LIMIT_BASE_MS;
   private lastRateLimitLogAt = 0;
+  private consecutiveSupabaseAuthErrors = 0;
+  private static readonly MAX_SUPABASE_AUTH_ERRORS = 5;
+
+  /** Check if sync is disabled via kill switch */
+  isSyncDisabled(): boolean {
+    try { return localStorage.getItem(GoogleSyncEngine.SYNC_KILL_SWITCH_KEY) === 'true'; } catch { return false; }
+  }
+
+  /** Enable or disable Google sync. When disabled, also clears pending queue. */
+  setSyncDisabled(disabled: boolean) {
+    try {
+      if (disabled) {
+        localStorage.setItem(GoogleSyncEngine.SYNC_KILL_SWITCH_KEY, 'true');
+        this.stop();
+        persistentSyncQueue.clearAll();
+        console.warn('[GoogleSyncEngine] *** SYNC DISABLED via kill switch. Queue cleared. ***');
+      } else {
+        localStorage.removeItem(GoogleSyncEngine.SYNC_KILL_SWITCH_KEY);
+        console.info('[GoogleSyncEngine] Sync re-enabled.');
+      }
+    } catch { /* */ }
+  }
+
+  /** Refresh Supabase session so RLS policies pass. Returns true if session is valid. */
+  private async ensureFreshSupabaseSession(): Promise<boolean> {
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) {
+      // Try a hard refresh
+      const { error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) {
+        console.error('[GoogleSyncEngine] Failed to refresh Supabase session:', refreshError.message);
+        return false;
+      }
+    }
+    return true;
+  }
 
   start(userId?: string | null) {
     const resolvedUserId = userId || useAppStore.getState().user?.id || null;
@@ -386,6 +423,12 @@ class GoogleSyncEngine {
     if (!userId || userId === 'demo') return;
     if (!isSupabaseConfigured()) return;
 
+    // Kill switch check
+    if (this.isSyncDisabled()) {
+      console.info('[GoogleSyncEngine] Sync skipped — kill switch is ON. Run googleSyncEngine.setSyncDisabled(false) to re-enable.');
+      return;
+    }
+
     if (this.syncing) {
       this.pendingSync = true;
       return;
@@ -426,6 +469,10 @@ class GoogleSyncEngine {
         return;
       }
       if (this.isRateLimitAbortError(error)) {
+        return;
+      }
+      if (error instanceof Error && error.message === 'SUPABASE_AUTH_ABORT') {
+        console.error('[GoogleSyncEngine] Sync aborted due to persistent Supabase auth failures. Will retry next cycle.');
         return;
       }
       console.error('[GoogleSyncEngine] Sync failed:', error);
@@ -579,6 +626,14 @@ class GoogleSyncEngine {
     const phaseErrors: Array<{ phase: string; error: unknown }> = [];
     console.log('[GoogleSyncEngine] === Sync cycle START ===');
 
+    // Ensure we have a valid Supabase session BEFORE doing anything
+    const sessionOk = await this.ensureFreshSupabaseSession();
+    if (!sessionOk) {
+      console.error('[GoogleSyncEngine] No valid Supabase session — skipping sync cycle.');
+      return;
+    }
+    this.consecutiveSupabaseAuthErrors = 0;
+
     let links = await this.getAllLinks(userId);
     console.log(`[GoogleSyncEngine] Phase: pushLocalEvents (${links.length} links)`);
 
@@ -587,6 +642,7 @@ class GoogleSyncEngine {
     } catch (error) {
       if (isNoGoogleAccessTokenError(error)) throw error;
       if (this.isRateLimitAbortError(error)) throw error;
+      if (error instanceof Error && error.message === 'SUPABASE_AUTH_ABORT') throw error;
       phaseErrors.push({ phase: 'pushLocalEvents', error });
     }
 
@@ -597,6 +653,7 @@ class GoogleSyncEngine {
     } catch (error) {
       if (isNoGoogleAccessTokenError(error)) throw error;
       if (this.isRateLimitAbortError(error)) throw error;
+      if (error instanceof Error && error.message === 'SUPABASE_AUTH_ABORT') throw error;
       phaseErrors.push({ phase: 'pushLocalTasks', error });
     }
 
@@ -607,6 +664,7 @@ class GoogleSyncEngine {
     } catch (error) {
       if (isNoGoogleAccessTokenError(error)) throw error;
       if (this.isRateLimitAbortError(error)) throw error;
+      if (error instanceof Error && error.message === 'SUPABASE_AUTH_ABORT') throw error;
       phaseErrors.push({ phase: 'pushLocalItems', error });
     }
 
@@ -617,6 +675,7 @@ class GoogleSyncEngine {
     } catch (error) {
       if (isNoGoogleAccessTokenError(error)) throw error;
       if (this.isRateLimitAbortError(error)) throw error;
+      if (error instanceof Error && error.message === 'SUPABASE_AUTH_ABORT') throw error;
       phaseErrors.push({ phase: 'pullRemoteEvents', error });
     }
 
@@ -627,6 +686,7 @@ class GoogleSyncEngine {
     } catch (error) {
       if (isNoGoogleAccessTokenError(error)) throw error;
       if (this.isRateLimitAbortError(error)) throw error;
+      if (error instanceof Error && error.message === 'SUPABASE_AUTH_ABORT') throw error;
       phaseErrors.push({ phase: 'pullRemoteTasks', error });
     }
 
@@ -846,7 +906,7 @@ class GoogleSyncEngine {
     remote_etag?: string | null;
     remote_updated_at?: string | null;
     direction: SyncDirection;
-  }) {
+  }): Promise<boolean> {
     // Delete any existing link for this entity+type that points to a DIFFERENT
     // google_id. This prevents 409 conflicts on the
     // (user_id, local_id, resource_type, local_type) unique index when the
@@ -882,6 +942,30 @@ class GoogleSyncEngine {
       .upsert(payload, { onConflict: 'local_id,google_id' });
 
     if (error) {
+      // RLS / auth failure (401/403) — refresh session and retry ONCE
+      const isAuthError = error.message?.includes('row-level security') ||
+        error.code === '42501' || error.code === 'PGRST301';
+      if (isAuthError) {
+        console.warn('[GoogleSyncEngine] upsertLink RLS error — refreshing session and retrying...');
+        const sessionOk = await this.ensureFreshSupabaseSession();
+        if (sessionOk) {
+          const { error: retryError } = await supabase
+            .from('google_resource_links')
+            .upsert(payload, { onConflict: 'local_id,google_id' });
+          if (!retryError) {
+            this.consecutiveSupabaseAuthErrors = 0;
+            return true;
+          }
+          console.error('[GoogleSyncEngine] upsertLink retry after session refresh also failed:', retryError.message);
+        }
+        this.consecutiveSupabaseAuthErrors++;
+        if (this.consecutiveSupabaseAuthErrors >= GoogleSyncEngine.MAX_SUPABASE_AUTH_ERRORS) {
+          console.error(`[GoogleSyncEngine] ${this.consecutiveSupabaseAuthErrors} consecutive Supabase auth errors — ABORTING sync cycle`);
+          throw new Error('SUPABASE_AUTH_ABORT');
+        }
+        return false;
+      }
+
       // If we STILL get a 409, do a hard DELETE of ALL rows for this
       // (local_id, resource_type) and then a plain INSERT.
       if (error.code === '23505') {
@@ -896,11 +980,15 @@ class GoogleSyncEngine {
           .insert(payload);
         if (insertError) {
           console.error('[GoogleSyncEngine] upsertLink INSERT fallback also failed:', insertError.message);
+          return false;
         }
       } else {
         console.warn('[GoogleSyncEngine] Failed upserting link:', error.message);
+        return false;
       }
     }
+    this.consecutiveSupabaseAuthErrors = 0;
+    return true;
   }
 
   private getRetryBackoffMs(retryCount: number) {
@@ -2234,6 +2322,27 @@ class GoogleSyncEngine {
       return restored.id;
     }
 
+    // DEDUP: Check if a list with the same name already exists in the store
+    // (prevents infinite duplicate list creation when upsertLink fails)
+    const existingByName = store.lists.find(
+      (l) => l.name === taskList.title && l.user_id === userId
+    );
+    if (existingByName) {
+      // Try to create the link for this existing list so future cycles find it
+      await this.upsertLink({
+        user_id: userId,
+        local_id: existingByName.id,
+        local_type: 'list',
+        google_id: taskList.id,
+        resource_type: 'task',
+        task_list_id: taskList.id,
+        remote_etag: taskList.etag || null,
+        remote_updated_at: taskList.updated || null,
+        direction: 'pull',
+      });
+      return existingByName.id;
+    }
+
     const localList: List = {
       id: generateId(),
       user_id: userId,
@@ -2458,6 +2567,29 @@ class GoogleSyncEngine {
             }
           }
         } else {
+          // DEDUP GUARD: before creating, double-check the store for an event
+          // with the same google_task_id (may have been created moments ago
+          // in this same cycle but link write failed due to 401).
+          const freshStore = useAppStore.getState();
+          const alreadyExists = freshStore.calendarEvents.find(
+            (e) => e.google_task_id === remote.id && !e.deleted_at
+          );
+          if (alreadyExists) {
+            // Just ensure the link exists, don't create a duplicate
+            await this.upsertLink({
+              user_id: userId,
+              local_id: alreadyExists.id,
+              local_type: 'calendar_event',
+              google_id: remote.id,
+              resource_type: 'task',
+              task_list_id: taskList.id,
+              remote_etag: remote.etag || null,
+              remote_updated_at: remoteUpdatedAt,
+              direction: 'pull',
+            });
+            continue;
+          }
+
           // Create a NEW CalendarEvent for this Google Task
           const dueDate = parseGoogleDate(remote.due);
           const startAt = dueDate || nowIso();

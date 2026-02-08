@@ -454,6 +454,18 @@ class PersistentQueue {
             this.saveToStorage();
         }
     }
+
+    /**
+     * Nuclear option: clear ALL pending operations.
+     * Used by sync kill switch to stop the queue storm.
+     */
+    clearAll() {
+        const count = this.queue.length;
+        this.queue = [];
+        this.isProcessing = false;
+        this.saveToStorage();
+        console.warn(`[Queue] *** CLEARED ALL ${count} pending operations ***`);
+    }
 }
 
 export const persistentSyncQueue = new PersistentQueue();
