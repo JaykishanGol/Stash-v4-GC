@@ -1130,6 +1130,7 @@ class GoogleSyncEngine {
     await useAppStore.getState().syncTaskToDb(merged);
   }
 
+  // @ts-expect-error kept for potential future use in pullRemoteTasks refactor
   private async createLocalTask(task: Task) {
     // Dedup guard: if a task with the same google_task_id already exists, patch instead
     if (task.google_task_id) {
@@ -2322,7 +2323,8 @@ class GoogleSyncEngine {
     for (const taskList of taskLists) {
       // We still need ensureLocalListForGoogleTaskList to maintain list mapping
       // but Google Tasks now become CalendarEvents, not Task records
-      const localListId = await this.ensureLocalListForGoogleTaskList(userId, taskList, links);
+      // Maintain list mapping (return value intentionally unused — side-effects only)
+      await this.ensureLocalListForGoogleTaskList(userId, taskList, links);
       const cursor = forceFullPull ? null : await this.getCursor(userId, 'task', taskList.id);
       const taskLinksForList = links.filter(
         (l) =>

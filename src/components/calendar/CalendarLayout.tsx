@@ -96,7 +96,7 @@ export function CalendarLayout() {
         const api = calendarRef.current?.getApi();
         if (api) {
             requestAnimationFrame(() => {
-                api.changeView(VIEW_MAP[viewMode]);
+                api.changeView(VIEW_MAP[viewMode as Exclude<ViewModeSimple, 'year'>]);
             });
         }
     }, [viewMode]);
@@ -396,7 +396,7 @@ export function CalendarLayout() {
                                 const item = useAppStore.getState().items.find(i => i.id === itemId);
                                 if (!item) return undefined;
                                 const existing = (item.content && typeof item.content === 'object') ? item.content as Record<string, unknown> : {};
-                                return { ...existing, google_sync_target: prevScheduledAt ? existing.google_sync_target : null };
+                                return { ...existing, google_sync_target: prevScheduledAt ? existing.google_sync_target : null } as typeof item.content;
                             })(),
                         });
                     }
@@ -477,7 +477,7 @@ export function CalendarLayout() {
 
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                     <FullCalendarView
-                        viewMode={VIEW_MAP[viewMode]}
+                        viewMode={VIEW_MAP[viewMode as Exclude<ViewModeSimple, 'year'>]}
                         onEventClick={handleEventClick}
                         onDateSelect={handleDateSelect}
                         onEventDrop={handleEventDrop}
@@ -634,6 +634,15 @@ export function CalendarLayout() {
                         onCreateTask={() => {
                             useAppStore.getState().addTask({
                                 title: '',
+                                description: null,
+                                user_id: useAppStore.getState().user?.id || 'demo',
+                                priority: 'none',
+                                remind_before: null,
+                                recurring_config: null,
+                                color: '',
+                                item_ids: [],
+                                item_completion: {},
+                                is_completed: false,
                                 scheduled_at: (selectedDate || new Date()).toISOString(),
                             });
                         }}
@@ -662,7 +671,7 @@ export function CalendarLayout() {
                         />
                     ) : (
                         <FullCalendarView
-                            viewMode={VIEW_MAP[viewMode]}
+                            viewMode={VIEW_MAP[viewMode as Exclude<ViewModeSimple, 'year'>]}
                             onEventClick={handleEventClick}
                             onDateSelect={handleDateSelect}
                             onEventDrop={handleEventDrop}

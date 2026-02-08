@@ -126,14 +126,16 @@ export function FullCalendarView({
         const calEvents = expanded.map(ev => {
             const fc = toFullCalendarEvent(ev);
             // Google Task styling: transparent bg with colored border + task icon
-            if (ev.is_google_task) {
+            if (ev.event.is_google_task) {
+                const fcObj = fc as Record<string, unknown>;
+                const existingProps = (fcObj.extendedProps ?? {}) as Record<string, unknown>;
                 return {
-                    ...fc,
+                    ...fcObj,
                     backgroundColor: 'transparent',
                     borderColor: '#1A73E8',
                     textColor: 'var(--text-primary, #202124)',
                     extendedProps: {
-                        ...fc.extendedProps,
+                        ...existingProps,
                         isGoogleTask: true,
                     },
                 };

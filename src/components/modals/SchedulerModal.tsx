@@ -527,7 +527,7 @@ export function SchedulerContent({ item, isTaskType, onClose, onSave, onDelete }
 }
 
 export function SchedulerModal() {
-    const { isSchedulerOpen, closeScheduler, schedulerItemId, schedulerEventId, schedulerOriginalStart, items, tasks, calendarEvents, updateItem, updateTask, deleteItem, deleteTask } = useAppStore();
+    const { isSchedulerOpen, closeScheduler, schedulerItemId, schedulerEventId, schedulerOriginalStart, items, tasks, calendarEvents, updateItem, updateTask, deleteItem: _deleteItem, deleteTask } = useAppStore();
     if (!isSchedulerOpen) return null;
 
     // If we have a schedulerEventId, render EventSchedulerContent
