@@ -46,8 +46,6 @@ interface FullCalendarViewProps {
     /** Called when an external item/task is dropped onto the calendar */
     onExternalDrop?: (itemId: string, isTask: boolean, start: Date) => void;
     calendarRef: React.RefObject<FullCalendar | null>;
-    /** Google ghost events to overlay (read-only) */
-    googleGhostEvents?: Array<{ id: string; title: string; start: Date; end?: Date; allDay: boolean; color: string; editable: false; extendedProps: Record<string, unknown> }>;
     /** Set of enabled calendar IDs for filtering */
     enabledCalendarIds?: Set<string>;
     /** Primary timezone for rendering */
@@ -65,7 +63,6 @@ export function FullCalendarView({
     onEventDeleted,
     onExternalDrop,
     calendarRef,
-    googleGhostEvents = [],
     enabledCalendarIds,
     timezone,
     secondaryTimezone,
@@ -91,8 +88,58 @@ export function FullCalendarView({
     // Expand recurring events for the visible range + merge scheduled items/tasks
     const fcEvents = useMemo(() => {
         if (!visibleRange.start || !visibleRange.end) return [];
-        const expanded = expandEventsForRange(calendarEvents, visibleRange.start, visibleRange.end);
-        const calEvents = expanded.map(toFullCalendarEvent);
+
+        // Filter Google Tasks for calendar display (matching Google Calendar behavior):
+        // - Hide completed tasks (they go in TasksPanel's "Completed" section)
+        // - Tasks WITH a due date show on their date (all-day)
+        // - Tasks WITHOUT a due date show on today (Google Calendar does this too)
+        const visibleCalendarEvents = calendarEvents.filter(e => {
+            if (e.is_google_task || e.google_calendar_id === 'tasks') {
+                if (e.is_completed) return false;
+            }
+            return true;
+        });
+
+        // Dedup by google_task_id / google_event_id + title fallback for tasks
+        const seenGTaskIds = new Set<string>();
+        const seenGEventIds = new Set<string>();
+        const seenTaskTitles = new Set<string>();
+        const dedupedEvents = visibleCalendarEvents.filter(e => {
+            if (e.google_task_id) {
+                if (seenGTaskIds.has(e.google_task_id)) return false;
+                seenGTaskIds.add(e.google_task_id);
+            }
+            if (e.google_event_id) {
+                if (seenGEventIds.has(e.google_event_id)) return false;
+                seenGEventIds.add(e.google_event_id);
+            }
+            // Title-based dedup fallback for task events (catches any remaining orphans)
+            if (e.google_calendar_id === 'tasks' || e.is_google_task) {
+                const key = `${e.title}::${e.start_at?.slice(0, 10) ?? ''}`;
+                if (seenTaskTitles.has(key)) return false;
+                seenTaskTitles.add(key);
+            }
+            return true;
+        });
+
+        const expanded = expandEventsForRange(dedupedEvents, visibleRange.start, visibleRange.end);
+        const calEvents = expanded.map(ev => {
+            const fc = toFullCalendarEvent(ev);
+            // Google Task styling: transparent bg with colored border + task icon
+            if (ev.is_google_task) {
+                return {
+                    ...fc,
+                    backgroundColor: 'transparent',
+                    borderColor: '#1A73E8',
+                    textColor: 'var(--text-primary, #202124)',
+                    extendedProps: {
+                        ...fc.extendedProps,
+                        isGoogleTask: true,
+                    },
+                };
+            }
+            return fc;
+        });
 
         // Color map for item types
         const typeColors: Record<string, string> = {
@@ -168,33 +215,28 @@ export function FullCalendarView({
                 };
             });
 
-        // Merge google ghost events
-        let allEvents = [...calEvents, ...scheduledItems, ...scheduledTasks, ...googleGhostEvents];
+        // Merge all event sources
+        let allEvents = [...calEvents, ...scheduledItems, ...scheduledTasks];
 
-        // Filter by enabled calendar IDs if provided
+        // Filter by enabled calendar IDs if provided (empty set = show all)
         if (enabledCalendarIds && enabledCalendarIds.size > 0) {
             allEvents = allEvents.filter(ev => {
                 const calId = (ev as { extendedProps?: { calendarEvent?: CalendarEvent } }).extendedProps?.calendarEvent?.google_calendar_id;
                 // Items, tasks, and ghost events always pass; calendar events filter by their calendar ID
                 if (!calId) return true;
+                // Google Task events always pass regardless of calendar filter
+                if (calId === 'tasks') return true;
                 return enabledCalendarIds.has(calId);
             });
         }
 
         return allEvents;
-    }, [calendarEvents, items, tasks, visibleRange, googleGhostEvents, enabledCalendarIds]);
+    }, [calendarEvents, items, tasks, visibleRange, enabledCalendarIds]);
 
     // Click on an event — show popover for calendar events, navigate for items/tasks
     const handleEventClick = useCallback(
         (info: EventClickArg) => {
             const props = info.event.extendedProps;
-
-            // Google ghost events → open in Google Calendar
-            if (props.isGoogleGhost) {
-                const htmlLink = props.htmlLink as string | undefined;
-                if (htmlLink) window.open(htmlLink, '_blank');
-                return;
-            }
 
             // Scheduled items/tasks → open editor/task directly
             if (props.isScheduledItem) {
@@ -253,16 +295,6 @@ export function FullCalendarView({
     const handleEventDrop = useCallback(
         (info: EventDropArg) => {
             const props = info.event.extendedProps;
-            // Don't allow dropping read-only google ghost events
-            if (props.isGoogleGhost) {
-                info.revert();
-                useAppStore.getState().addNotification?.(
-                    'info',
-                    'Read-only Google event',
-                    'This event comes from Google. Move it in Google Calendar, then refresh.'
-                );
-                return;
-            }
             const newStart = info.event.start!;
             const calendarEvent = props.calendarEvent as CalendarEvent | undefined;
             const originalDurationMs = calendarEvent
@@ -295,16 +327,9 @@ export function FullCalendarView({
         (info: any) => {
             if (!onEventResize) return;
             const props = info.event.extendedProps;
-            // Ghost events and scheduled items/tasks can't be resized
-            if (props.isGoogleGhost || props.isScheduledItem) {
+            // Scheduled items/tasks can't be resized
+            if (props.isScheduledItem) {
                 info.revert();
-                if (props.isGoogleGhost) {
-                    useAppStore.getState().addNotification?.(
-                        'info',
-                        'Read-only Google event',
-                        'This event comes from Google. Resize it in Google Calendar.'
-                    );
-                }
                 return;
             }
             const newStart = info.event.start!;
@@ -348,17 +373,19 @@ export function FullCalendarView({
     const renderEventContent = useCallback((arg: EventContentArg) => {
         const props = arg.event.extendedProps;
         const isTask = props.isTask;
-        const isGhost = props.isGoogleGhost;
+        const isGoogleTask = props.isGoogleTask;
         const color = arg.event.backgroundColor || '#039be5';
 
         if (arg.view.type === 'dayGridMonth') {
             // Month view: compact dot + title
             return (
                 <div
-                    className={`fc-google-event-month ${isGhost ? 'fc-ghost-event' : ''}`}
-                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '1px 4px', overflow: 'hidden', opacity: isGhost ? 0.7 : 1 }}
+                    className="fc-google-event-month"
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '1px 4px', overflow: 'hidden' }}
                 >
-                    {isTask ? (
+                    {isGoogleTask ? (
+                        <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', border: '2px solid #1A73E8', display: 'inline-block' }} />
+                    ) : isTask ? (
                         <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 2, border: `2px solid ${color}`, display: 'inline-block' }} />
                     ) : arg.event.allDay ? null : (
                         <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
@@ -369,7 +396,6 @@ export function FullCalendarView({
                         </span>
                     )}
                     <span style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {isGhost && <span style={{ marginRight: 3, fontSize: 10 }}>G</span>}
                         {arg.event.title}
                     </span>
                 </div>
@@ -379,19 +405,19 @@ export function FullCalendarView({
         // Week/Day view: vertical card
         return (
             <div
-                className={`fc-google-event-time ${isGhost ? 'fc-ghost-event' : ''}`}
+                className="fc-google-event-time"
                 style={{
                     padding: '2px 6px',
                     overflow: 'hidden',
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
-                    opacity: isGhost ? 0.7 : 1,
-                    borderLeft: isGhost ? `3px dashed ${color}` : undefined,
+                    ...(isGoogleTask ? { border: '1px solid #1A73E8', borderRadius: 4, background: 'rgba(26,115,232,0.06)' } : {}),
                 }}
             >
                 <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {isTask && <span style={{ marginRight: 4 }}>☐</span>}
+                    {isGoogleTask && <span style={{ marginRight: 4 }}>○</span>}
+                    {isTask && !isGoogleTask && <span style={{ marginRight: 4 }}>☐</span>}
                     {arg.event.title}
                 </div>
                 {arg.timeText && (

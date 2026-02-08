@@ -256,6 +256,16 @@ class PersistentQueue {
                     continue; // Retry the same operation
                 }
 
+                // Check for unique constraint violation (duplicate google_task_id or google_event_id)
+                // Postgres error 23505 = unique_violation. The data already exists, so drop the op.
+                const isUniqueViolation = error?.code === '23505' || statusCode === '23505' || errorMsg.includes('unique constraint');
+                if (isUniqueViolation) {
+                    console.warn(`[Queue] Unique constraint conflict for ${op.id}: ${errorMsg}. Data already exists — dropping.`);
+                    this.queue.shift();
+                    this.saveToStorage();
+                    continue;
+                }
+
                 // Check if it's a permanent error (schema mismatch, 400 Bad Request)
                 // Postgres Error 42703 is "undefined_column"
                 const isSchemaError = errorMsg.includes('Could not find') && errorMsg.includes('column');
@@ -334,8 +344,8 @@ class PersistentQueue {
                 // Item fields (simplified scheduler)
                 ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
             } else if (type === 'upsert-event') {
-                // CalendarEvent fields
-                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'attachments', 'google_event_id', 'google_calendar_id', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at'];
+                // CalendarEvent fields (including Google Task fields)
+                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'attachments', 'google_event_id', 'google_calendar_id', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at', 'is_google_task', 'google_task_id', 'google_task_list_id', 'is_completed', 'completed_at', 'sort_position'];
             }
 
             // Filter entries

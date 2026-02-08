@@ -11,7 +11,6 @@ import { useCalendarShortcuts } from '../../hooks/useCalendarShortcuts';
 import { useEventReminders } from '../../hooks/useEventReminders';
 import { ChevronLeft, ChevronRight, RefreshCw, Layout, Calendar as CalendarIcon, Menu, Search, X } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { googleSyncEngine } from '../../lib/googleSyncEngine';
 import type FullCalendar from '@fullcalendar/react';
 import type { RecurrenceEditMode } from '../../lib/types';
 
@@ -35,8 +34,8 @@ export function CalendarLayout() {
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchInputRef = useRef<HTMLInputElement>(null);
-    // Enabled calendar IDs for multi-calendar filtering
-    const [enabledCalendarIds, setEnabledCalendarIds] = useState<Set<string>>(new Set(['primary']));
+    // Enabled calendar IDs for multi-calendar filtering (empty = show all until sidebar loads)
+    const [enabledCalendarIds, setEnabledCalendarIds] = useState<Set<string>>(new Set());
 
     // Undo toast state
     const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
@@ -68,7 +67,12 @@ export function CalendarLayout() {
     // In-app event reminder notifications
     useEventReminders();
 
-    // Undo handler â€” called from popover when event is deleted
+    // Stable callback for calendar sidebar to propagate enabled calendar IDs
+    const handleCalendarToggle = useCallback((enabledIds: Set<string>) => {
+        setEnabledCalendarIds(enabledIds);
+    }, []);
+
+    // Undo handler — called from popover when event is deleted
     const handleEventDeleted = useCallback((message: string, undoFn: () => void) => {
         undoIdRef.current++;
         setUndoAction({
@@ -170,7 +174,7 @@ export function CalendarLayout() {
         },
     });
 
-    // Handle sidebar date click â†’ navigate FullCalendar
+    // Handle sidebar date click → navigate FullCalendar
     const handleSidebarDateChange = useCallback((date: Date) => {
         const api = calendarRef.current?.getApi();
         if (api) {
@@ -245,17 +249,16 @@ export function CalendarLayout() {
 
     const handleEventDrop = useCallback(
         (eventId: string, newStart: Date, newEnd: Date, isRecurrenceInstance: boolean, masterEventId?: string, originalStart?: string, isScheduledItem?: boolean, isTask?: boolean) => {
-            const normalizedId = eventId.replace(/^(task-|item-)/, '');
             // Handle scheduled items/tasks differently
             if (isScheduledItem) {
                 const oldScheduledAt = isTask
-                    ? useAppStore.getState().tasks.find(t => t.id === normalizedId)?.scheduled_at ?? null
-                    : useAppStore.getState().items.find(i => i.id === normalizedId)?.scheduled_at ?? null;
+                    ? useAppStore.getState().tasks.find(t => t.id === eventId)?.scheduled_at ?? null
+                    : useAppStore.getState().items.find(i => i.id === eventId)?.scheduled_at ?? null;
                 
                 if (isTask) {
-                    updateTask(normalizedId, { scheduled_at: newStart.toISOString() });
+                    updateTask(eventId, { scheduled_at: newStart.toISOString() });
                 } else {
-                    updateItem(normalizedId, { scheduled_at: newStart.toISOString() });
+                    updateItem(eventId, { scheduled_at: newStart.toISOString() });
                 }
                 // Undo toast
                 undoIdRef.current++;
@@ -263,8 +266,8 @@ export function CalendarLayout() {
                     id: String(undoIdRef.current),
                     message: `${isTask ? 'Task' : 'Item'} moved`,
                     undoFn: () => {
-                        if (isTask) updateTask(normalizedId, { scheduled_at: oldScheduledAt });
-                        else updateItem(normalizedId, { scheduled_at: oldScheduledAt });
+                        if (isTask) updateTask(eventId, { scheduled_at: oldScheduledAt });
+                        else updateItem(eventId, { scheduled_at: oldScheduledAt });
                     },
                 });
                 return;
@@ -280,7 +283,7 @@ export function CalendarLayout() {
                     pendingData: { newStart, newEnd },
                 });
             } else {
-                // Check if this is a master (has rrule) â€” if so, show dialog for 'all' edit
+                // Check if this is a master (has rrule) — if so, show dialog for 'all' edit
                 const event = calendarEvents.find(e => e.id === eventId);
                 if (event?.rrule) {
                     setRecurrenceDialog({
@@ -358,19 +361,45 @@ export function CalendarLayout() {
     // Handle external items/tasks dropped from TasksPanel onto the calendar
     const handleExternalDrop = useCallback(
         (itemId: string, isTask: boolean, start: Date) => {
-            const normalizedId = itemId.replace(/^(task-|item-)/, '');
+            // Capture previous scheduled_at for proper undo
+            const prevScheduledAt = isTask
+                ? useAppStore.getState().tasks.find(t => t.id === itemId)?.scheduled_at ?? null
+                : useAppStore.getState().items.find(i => i.id === itemId)?.scheduled_at ?? null;
+
             if (isTask) {
-                updateTask(normalizedId, { scheduled_at: start.toISOString() });
+                updateTask(itemId, { scheduled_at: start.toISOString() });
             } else {
-                updateItem(normalizedId, { scheduled_at: start.toISOString() });
+                // Set both scheduled_at and google_sync_target so the engine
+                // knows to sync this item as a Google Calendar event
+                updateItem(itemId, {
+                    scheduled_at: start.toISOString(),
+                    content: (() => {
+                        const item = useAppStore.getState().items.find(i => i.id === itemId);
+                        if (!item) return undefined;
+                        const existing = (item.content && typeof item.content === 'object') ? item.content as Record<string, unknown> : {};
+                        return { ...existing, google_sync_target: 'event' };
+                    })(),
+                });
             }
             undoIdRef.current++;
             setUndoAction({
                 id: String(undoIdRef.current),
                 message: `${isTask ? 'Task' : 'Item'} scheduled`,
                 undoFn: () => {
-                    if (isTask) updateTask(normalizedId, { scheduled_at: null });
-                    else updateItem(normalizedId, { scheduled_at: null });
+                    if (isTask) {
+                        updateTask(itemId, { scheduled_at: prevScheduledAt });
+                    } else {
+                        // Clear both scheduled_at and google_sync_target on undo
+                        updateItem(itemId, {
+                            scheduled_at: prevScheduledAt,
+                            content: (() => {
+                                const item = useAppStore.getState().items.find(i => i.id === itemId);
+                                if (!item) return undefined;
+                                const existing = (item.content && typeof item.content === 'object') ? item.content as Record<string, unknown> : {};
+                                return { ...existing, google_sync_target: prevScheduledAt ? existing.google_sync_target : null };
+                            })(),
+                        });
+                    }
                 },
             });
         },
@@ -448,7 +477,7 @@ export function CalendarLayout() {
 
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                     <FullCalendarView
-                        viewMode={VIEW_MAP[viewMode === 'year' ? 'month' : viewMode]}
+                        viewMode={VIEW_MAP[viewMode]}
                         onEventClick={handleEventClick}
                         onDateSelect={handleDateSelect}
                         onEventDrop={handleEventDrop}
@@ -557,14 +586,7 @@ export function CalendarLayout() {
                         </button>
                     )}
 
-                    <button
-                        className={`icon-btn ${isEventsLoading ? 'rotating' : ''}`}
-                        onClick={() => {
-                            loadEvents();
-                            void googleSyncEngine.syncNow('manual-refresh');
-                        }}
-                        title="Refresh"
-                    >
+                    <button className={`icon-btn ${isEventsLoading ? 'rotating' : ''}`} onClick={() => { loadEvents(); }} title="Refresh">
                         <RefreshCw size={18} />
                     </button>
                     
@@ -611,20 +633,11 @@ export function CalendarLayout() {
                         }}
                         onCreateTask={() => {
                             useAppStore.getState().addTask({
-                                user_id: user?.id || 'demo',
                                 title: '',
-                                description: null,
-                                color: '#10B981',
-                                priority: 'none',
                                 scheduled_at: (selectedDate || new Date()).toISOString(),
-                                remind_before: null,
-                                recurring_config: null,
-                                item_ids: [],
-                                item_completion: {},
-                                is_completed: false,
                             });
                         }}
-                        onCalendarToggle={(enabledIds) => setEnabledCalendarIds(enabledIds)}
+                        onCalendarToggle={handleCalendarToggle}
                     />
                 )}
 

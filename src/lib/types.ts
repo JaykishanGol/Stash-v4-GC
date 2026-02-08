@@ -205,11 +205,35 @@ export interface CalendarEvent {
   google_etag?: string | null;
   remote_updated_at?: string | null;
 
+  // Google Task fields (when is_google_task = true, this event represents a Google Task)
+  is_google_task?: boolean;
+  google_task_id?: string | null;
+  google_task_list_id?: string | null;
+  is_completed?: boolean;
+  completed_at?: string | null;
+  sort_position?: string | null;
+
   // Metadata
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
   is_unsynced?: boolean;
+}
+
+// ============ GOOGLE CALENDAR STATE ============
+// Tracks discovered Google calendars for sync
+
+export interface GoogleCalendarEntry {
+  id: string;
+  summary: string;
+  primary?: boolean;
+  backgroundColor?: string;
+  selected?: boolean;
+}
+
+export interface GoogleCalendarState {
+  calendars: GoogleCalendarEntry[];
+  lastFetched: string | null;
 }
 
 // ============ TASK INTERFACE ============
@@ -234,6 +258,8 @@ export interface Task {
   item_ids: string[];
   item_completion: Record<string, boolean>;
   is_completed: boolean;
+  completed_at?: string | null;
+  google_task_id?: string | null;
   google_etag?: string | null;
   remote_updated_at?: string | null;
   is_unsynced?: boolean;

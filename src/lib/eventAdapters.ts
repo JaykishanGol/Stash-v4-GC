@@ -31,6 +31,14 @@ interface EventRow {
     google_calendar_id: string | null;
     google_etag: string | null;
     remote_updated_at: string | null;
+    // Google Task fields
+    is_google_task?: boolean;
+    google_task_id?: string | null;
+    google_task_list_id?: string | null;
+    is_completed?: boolean;
+    completed_at?: string | null;
+    sort_position?: string | null;
+    // Metadata
     created_at: string | null;
     updated_at: string | null;
     deleted_at: string | null;
@@ -80,6 +88,14 @@ export function adaptEventRow(row: EventRow): CalendarEvent {
         google_calendar_id: row.google_calendar_id || 'primary',
         google_etag: row.google_etag || null,
         remote_updated_at: row.remote_updated_at || null,
+        // Google Task fields
+        is_google_task: row.is_google_task ?? false,
+        google_task_id: row.google_task_id ?? null,
+        google_task_list_id: row.google_task_list_id ?? null,
+        is_completed: row.is_completed ?? false,
+        completed_at: row.completed_at ?? null,
+        sort_position: row.sort_position ?? null,
+        // Metadata
         created_at: row.created_at || new Date().toISOString(),
         updated_at: row.updated_at || new Date().toISOString(),
         deleted_at: row.deleted_at || null,

@@ -118,7 +118,15 @@ export const useAppStore = create<AppState>()(
                     const trashedItems = finalItems.filter((i: Item) => i.deleted_at);
 
                     // Use adapters for proper type conversion
-                    const sanitizedTasks = adaptTaskRows(tasksData || []);
+                    const rawTasks = adaptTaskRows(tasksData || []);
+                    // Dedup: keep first task per google_task_id (fixes triple-task duplication)
+                    const seenGoogleTaskIds = new Set<string>();
+                    const sanitizedTasks = rawTasks.filter(t => {
+                        if (!t.google_task_id) return true;
+                        if (seenGoogleTaskIds.has(t.google_task_id)) return false;
+                        seenGoogleTaskIds.add(t.google_task_id);
+                        return true;
+                    });
                     const sanitizedLists = adaptListRows(listsData || []);
 
                     const hasMore = count ? count > PAGE_SIZE : false;

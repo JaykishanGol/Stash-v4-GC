@@ -27,14 +27,18 @@ export function CalendarSidebar({ selectedDate, onDateChange, onDateSelect, onCr
         if (hasGoogleAuth && !googleAuthLoading) {
             GoogleClient.listCalendars().then(cals => {
                 setCalendars(cals);
-                setEnabledCalendars(new Set(cals.map(c => c.id)));
+                // Enable all discovered calendars + 'tasks' for Google Task events
+                const allIds = new Set([...cals.map(c => c.id), 'tasks']);
+                setEnabledCalendars(allIds);
+                // Propagate to parent so FullCalendarView uses real calendar IDs
+                onCalendarToggle?.(allIds);
             }).catch((error) => {
                 if (!isNoGoogleAccessTokenError(error)) {
                     console.error(error);
                 }
             });
         }
-    }, [hasGoogleAuth, googleAuthLoading]);
+    }, [hasGoogleAuth, googleAuthLoading, onCalendarToggle]);
 
     // Mini calendar days
     const monthStart = startOfMonth(miniCalDate);

@@ -3,23 +3,27 @@ import { format, isToday, isTomorrow, isPast, isYesterday } from 'date-fns';
 import { Plus, ChevronDown, ChevronRight, Circle, CheckCircle2, Calendar, Cloud, GripVertical, StickyNote, FileText, Image, Link2, FolderClosed } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { Draggable } from '@fullcalendar/interaction';
-import type { Task } from '../../lib/types';
+import type { CalendarEvent } from '../../lib/types';
 
 interface UnifiedTask {
     id: string;
     title: string;
     due_at?: string | null;
     is_completed: boolean;
-    type: 'local';
-    originalData?: Task;
+    list_id?: string | null;
+    sort_position?: string | null;
+    completed_at?: string | null;
+    type: 'google-task' | 'local';
+    originalEvent?: CalendarEvent;
 }
 
 export function TasksPanel() {
-    const { tasks, items, addTask, toggleTaskCompletion, openScheduler, user } = useAppStore();
+    const { calendarEvents, tasks, items, addTask, toggleTaskCompletion, openScheduler, user, lists } = useAppStore();
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [showCompleted, setShowCompleted] = useState(false);
     const [activeTab, setActiveTab] = useState<'tasks' | 'items'>('tasks');
     const [itemFilter, setItemFilter] = useState<'note' | 'file' | 'image' | 'link' | 'folder'>('note');
+    const [listFilter, setListFilter] = useState<string | null>(null);
 
     // Refs for FullCalendar Draggable initialization
     const taskListRef = useRef<HTMLDivElement>(null);
@@ -83,28 +87,105 @@ export function TasksPanel() {
         folder: items.filter(i => i.type === 'folder' && !i.deleted_at).length,
     };
 
-    // Convert to unified format
+    // Convert to unified format — Google Tasks from CalendarEvents + legacy Task records + local Tasks
+    // Track titles we've already seen from CalendarEvents to avoid double-counting
+    const seenTaskTitles = new Set<string>();
+
     const unifiedTasks: UnifiedTask[] = [
-        // Canonical source: local mirrored tasks only
-        ...tasks.filter(t => !t.deleted_at).map(t => ({
-            id: t.id,
-            title: t.title,
-            due_at: t.scheduled_at,
-            is_completed: t.is_completed,
-            type: 'local' as const,
-            originalData: t
-        })),
+        // Google Tasks: CalendarEvents where is_google_task = true
+        ...calendarEvents
+            .filter(e => e.is_google_task && !e.deleted_at)
+            .map(e => {
+                seenTaskTitles.add(e.title);
+                return {
+                    id: e.id,
+                    title: e.title,
+                    due_at: e.start_at,
+                    is_completed: e.is_completed ?? false,
+                    list_id: e.google_task_list_id ?? null,
+                    sort_position: e.sort_position ?? null,
+                    completed_at: e.completed_at ?? null,
+                    type: 'google-task' as const,
+                    originalEvent: e,
+                };
+            }),
+        // Legacy Task records synced from Google (have google_task_id set)
+        // Only include if NOT already represented as a CalendarEvent above
+        ...tasks
+            .filter(t => !t.deleted_at && t.google_task_id && !seenTaskTitles.has(t.title))
+            .map(t => {
+                seenTaskTitles.add(t.title);
+                return {
+                    id: t.id,
+                    title: t.title,
+                    due_at: t.scheduled_at,
+                    is_completed: t.is_completed,
+                    list_id: t.list_id,
+                    sort_position: t.sort_position,
+                    completed_at: t.completed_at ?? null,
+                    type: 'google-task' as const,
+                    originalEvent: undefined,
+                };
+            }),
+        // Items synced as Google Tasks (from prior sync cycles)
+        // Only include if NOT already represented above
+        ...items
+            .filter(i => !i.deleted_at && (i.content as any)?.google_sync_target === 'task' && !seenTaskTitles.has(i.title))
+            .map(i => {
+                seenTaskTitles.add(i.title);
+                return {
+                    id: i.id,
+                    title: i.title,
+                    due_at: i.scheduled_at,
+                    is_completed: i.is_completed,
+                    list_id: (i.content as any)?.google_sync_task_list_id ?? null,
+                    sort_position: null,
+                    completed_at: null,
+                    type: 'google-task' as const,
+                    originalEvent: undefined,
+                };
+            }),
+        // Local app Tasks (our checklist entity — ones WITHOUT google_task_id)
+        ...tasks
+            .filter(t => !t.deleted_at && !t.google_task_id && (listFilter === null || t.list_id === listFilter))
+            .map(t => ({
+                id: t.id,
+                title: t.title,
+                due_at: t.scheduled_at,
+                is_completed: t.is_completed,
+                list_id: t.list_id,
+                sort_position: t.sort_position,
+                completed_at: t.completed_at ?? null,
+                type: 'local' as const,
+                originalEvent: undefined,
+            })),
     ];
 
     // Filter active and completed
     const activeTasks = unifiedTasks.filter(t => !t.is_completed);
-    const completedTasks = unifiedTasks.filter(t => t.is_completed);
+    // Completed tasks sorted newest first (by completed_at descending)
+    const completedTasks = unifiedTasks.filter(t => t.is_completed).sort((a, b) => {
+        const aTime = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const bTime = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return bTime - aTime; // Newest first
+    });
 
-    // Group active by deadline
-    const noDeadline = activeTasks.filter(t => !t.due_at);
-    const withDeadline = activeTasks.filter(t => t.due_at).sort((a, b) =>
-        new Date(a.due_at!).getTime() - new Date(b.due_at!).getTime()
-    );
+    // Group active by deadline, sort by sort_position (Google ordering) then due_at
+    const noDeadline = activeTasks.filter(t => !t.due_at).sort((a, b) => {
+        if (a.sort_position && b.sort_position) return a.sort_position.localeCompare(b.sort_position);
+        if (a.sort_position) return -1;
+        if (b.sort_position) return 1;
+        return 0;
+    });
+    const withDeadline = activeTasks.filter(t => t.due_at).sort((a, b) => {
+        // Primary: sort_position (Google ordering)
+        if (a.sort_position && b.sort_position) {
+            const posCompare = a.sort_position.localeCompare(b.sort_position);
+            if (posCompare !== 0) return posCompare;
+        }
+        // Fallback: due_at ascending
+        return new Date(a.due_at!).getTime() - new Date(b.due_at!).getTime();
+    });
 
     const handleAddTask = () => {
         if (!newTaskTitle.trim()) return;
@@ -145,11 +226,29 @@ export function TasksPanel() {
     };
 
     const handleToggle = (task: UnifiedTask) => {
-        toggleTaskCompletion(task.id);
+        if (task.type === 'google-task' && task.originalEvent) {
+            // For Google Tasks (stored as CalendarEvents), toggle via patchLocalEvent
+            const store = useAppStore.getState();
+            const event = store.calendarEvents.find(e => e.id === task.id);
+            if (event) {
+                const nowStr = new Date().toISOString();
+                const newCompleted = !event.is_completed;
+                useAppStore.setState(s => ({
+                    calendarEvents: s.calendarEvents.map(e =>
+                        e.id === task.id
+                            ? { ...e, is_completed: newCompleted, completed_at: newCompleted ? nowStr : null, is_unsynced: true, updated_at: nowStr }
+                            : e
+                    ),
+                }));
+                store.syncEventToDb({ ...event, is_completed: newCompleted, completed_at: newCompleted ? nowStr : null, is_unsynced: true, updated_at: nowStr });
+            }
+        } else {
+            toggleTaskCompletion(task.id);
+        }
     };
 
     const TaskItem = ({ task }: { task: UnifiedTask }) => {
-        const isGoogleLinked = !!task.originalData?.google_etag;
+        const isGoogleTask = task.type === 'google-task';
         return (
         <div
             className="task-item fc-external-event"
@@ -173,7 +272,7 @@ export function TasksPanel() {
                     <span className={`task-title ${task.is_completed ? 'completed' : ''}`}>
                         {task.title}
                     </span>
-                    {isGoogleLinked && <span title="Google-synced task"><Cloud size={12} color="#1A73E8" /></span>}
+                    {isGoogleTask && <span title="Google Task"><Cloud size={12} color="#1A73E8" /></span>}
                 </div>
                 {task.due_at && (
                     <span className="task-deadline" style={{ color: getDeadlineColor(task.due_at) }}>
@@ -212,6 +311,29 @@ export function TasksPanel() {
 
             {activeTab === 'tasks' ? (
                 <>
+                    {/* List Scope Filter */}
+                    {lists.length > 0 && (
+                        <div className="list-filter-row" style={{ display: 'flex', gap: 4, padding: '4px 12px', overflowX: 'auto', flexShrink: 0 }}>
+                            <button
+                                className={`panel-tab${listFilter === null ? ' active' : ''}`}
+                                style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}
+                                onClick={() => setListFilter(null)}
+                            >
+                                All Lists
+                            </button>
+                            {lists.map(list => (
+                                <button
+                                    key={list.id}
+                                    className={`panel-tab${listFilter === list.id ? ' active' : ''}`}
+                                    style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}
+                                    onClick={() => setListFilter(list.id)}
+                                >
+                                    {list.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     {/* Add Task */}
                     <div className="add-task-row">
                         <Plus size={20} color="#1A73E8" />

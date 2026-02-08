@@ -113,6 +113,15 @@ export function MainCanvas() {
             const now = new Date();
             const { items, tasks, addNotification, acknowledgeReminder } = useAppStore.getState();
 
+            // Evict old entries to prevent unbounded growth
+            if (notifiedIds.size > 500) {
+                const arr = [...notifiedIds];
+                arr.splice(0, arr.length - 200);
+                notifiedIds.clear();
+                arr.forEach(id => notifiedIds.add(id));
+                persistNotifiedIds();
+            }
+
             // Check Items
             items.forEach(item => {
                 if (item.deleted_at) return;

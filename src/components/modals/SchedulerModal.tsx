@@ -600,7 +600,14 @@ export function SchedulerModal() {
             }}
             onDelete={async () => {
                 if (isTaskType) deleteTask(item.id);
-                else await deleteItem(item.id);
+                else {
+                    // Unschedule the item from the calendar — don't trash/delete the actual item
+                    await updateItem(item.id, {
+                        scheduled_at: null,
+                        recurring_config: null,
+                        remind_before: null,
+                    });
+                }
             }}
         />
     );

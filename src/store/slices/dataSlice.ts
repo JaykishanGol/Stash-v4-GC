@@ -805,14 +805,23 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         const now = new Date().toISOString();
         const table = type === 'task' ? 'tasks' : 'items';
 
-        // Optimistic local update
+        // Direct Zustand state patch — does NOT set is_unsynced
+        // (acknowledgment is a local-only operation, not synced to Google)
         if (type === 'task') {
-            get().updateTask(id, { last_acknowledged_at: now } as any);
+            set((state) => ({
+                tasks: state.tasks.map(t =>
+                    t.id === id ? { ...t, last_acknowledged_at: now } as any : t
+                ),
+            }));
         } else {
-            get().updateItem(id, { last_acknowledged_at: now } as any);
+            set((state) => ({
+                items: state.items.map(i =>
+                    i.id === id ? { ...i, last_acknowledged_at: now } as any : i
+                ),
+            }));
         }
 
-        // Persist to DB
+        // Persist to DB directly (bypasses sync-triggering path)
         const { supabase, isSupabaseConfigured } = await import('../../lib/supabase');
         if (isSupabaseConfigured()) {
             const { error } = await supabase

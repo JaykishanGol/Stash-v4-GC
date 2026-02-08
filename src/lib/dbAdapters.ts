@@ -4,7 +4,7 @@
  */
 
 import type { Tables } from './database.types';
-import type { Item, Task, List, PriorityLevel, RecurringConfig } from './types';
+import type { Item, Task, List, CalendarEvent, PriorityLevel, RecurringConfig } from './types';
 
 type ItemRow = Tables<'items'>;
 type TaskRow = Tables<'tasks'>;
@@ -107,6 +107,8 @@ export function adaptTaskRow(row: TaskRow): Task {
         item_ids: row.item_ids ?? [],
         item_completion: (row.item_completion as Record<string, boolean>) ?? {},
         is_completed: row.is_completed ?? false,
+        completed_at: (row as TaskRow & { completed_at?: string | null }).completed_at ?? null,
+        google_task_id: (row as TaskRow & { google_task_id?: string | null }).google_task_id ?? null,
         google_etag: (row as TaskRow & { google_etag?: string | null }).google_etag ?? null,
         remote_updated_at: (row as TaskRow & { remote_updated_at?: string | null }).remote_updated_at ?? null,
         is_unsynced: (row as TaskRow & { is_unsynced?: boolean }).is_unsynced ?? false,
@@ -114,6 +116,59 @@ export function adaptTaskRow(row: TaskRow): Task {
         updated_at: row.updated_at ?? new Date().toISOString(),
         deleted_at: row.deleted_at ?? null,
     };
+}
+
+/**
+ * Convert Supabase events row to frontend CalendarEvent type
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function adaptEventRow(row: any): CalendarEvent {
+    return {
+        id: row.id,
+        user_id: row.user_id,
+        title: row.title ?? '',
+        description: row.description ?? '',
+        start_at: row.start_at ?? new Date().toISOString(),
+        end_at: row.end_at ?? new Date().toISOString(),
+        is_all_day: row.is_all_day ?? false,
+        rrule: row.rrule ?? null,
+        parent_event_id: row.parent_event_id ?? null,
+        recurring_event_id: row.recurring_event_id ?? null,
+        is_deleted_instance: row.is_deleted_instance ?? false,
+        location: row.location ?? '',
+        color_id: row.color_id ?? '7',
+        visibility: row.visibility ?? 'default',
+        transparency: row.transparency ?? 'opaque',
+        timezone: row.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+        attendees: Array.isArray(row.attendees) ? row.attendees : [],
+        conference_data: row.conference_data ?? null,
+        reminders: Array.isArray(row.reminders) ? row.reminders : [],
+        attachments: Array.isArray(row.attachments) ? row.attachments : [],
+        google_event_id: row.google_event_id ?? null,
+        google_calendar_id: row.google_calendar_id ?? 'primary',
+        google_etag: row.google_etag ?? null,
+        remote_updated_at: row.remote_updated_at ?? null,
+        // Google Task fields
+        is_google_task: row.is_google_task ?? false,
+        google_task_id: row.google_task_id ?? null,
+        google_task_list_id: row.google_task_list_id ?? null,
+        is_completed: row.is_completed ?? false,
+        completed_at: row.completed_at ?? null,
+        sort_position: row.sort_position ?? null,
+        // Metadata
+        created_at: row.created_at ?? new Date().toISOString(),
+        updated_at: row.updated_at ?? new Date().toISOString(),
+        deleted_at: row.deleted_at ?? null,
+        is_unsynced: row.is_unsynced ?? false,
+    };
+}
+
+/**
+ * Batch convert event rows
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function adaptEventRows(rows: any[]): CalendarEvent[] {
+    return rows.map(adaptEventRow);
 }
 
 /**

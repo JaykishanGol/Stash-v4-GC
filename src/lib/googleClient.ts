@@ -296,7 +296,7 @@ export class GoogleClient {
 
         do {
             const params = new URLSearchParams();
-            params.set('minAccessRole', 'writer');
+            params.set('minAccessRole', 'reader');
             params.set('maxResults', '250');
             if (pageToken) params.set('pageToken', pageToken);
 

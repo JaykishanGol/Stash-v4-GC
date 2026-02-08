@@ -62,22 +62,102 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 return;
             }
 
-            const { data, error } = await supabase
-                .from('events')
-                .select('*')
-                .eq('user_id', user.id)
-                .order('start_at', { ascending: true });
+            // Paginate to load ALL events (Supabase default limit is 1000)
+            const PAGE_SIZE = 1000;
+            let allData: any[] = [];
+            let from = 0;
+            let hasMore = true;
 
-            if (error) {
-                console.error('[EventSlice] Load error:', error);
-                set({ isEventsLoading: false });
-                return;
+            while (hasMore) {
+                const { data, error } = await supabase
+                    .from('events')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('start_at', { ascending: true })
+                    .range(from, from + PAGE_SIZE - 1);
+
+                if (error) {
+                    console.error('[EventSlice] Load error:', error);
+                    set({ isEventsLoading: false });
+                    return;
+                }
+
+                allData = allData.concat(data || []);
+                hasMore = (data?.length ?? 0) === PAGE_SIZE;
+                from += PAGE_SIZE;
             }
 
             const { adaptEventRows } = await import('../../lib/eventAdapters');
-            const events = adaptEventRows(data || []);
+            const rawEvents = adaptEventRows(allData);
 
-            // Smart merge: preserve unsynced local events
+            // ONE-TIME CLEANUP: Delete ALL task-sourced events from DB that lack google_task_id.
+            // These are duplicates from prior sync cycles where the sanitizer stripped the field.
+            // pullRemoteTasks will recreate them properly with google_task_id set.
+            const orphanedTaskEventIds = rawEvents
+                .filter(e => e.google_calendar_id === 'tasks' && !e.google_task_id)
+                .map(e => e.id);
+            if (orphanedTaskEventIds.length > 0) {
+                console.warn(`[EventSlice] Cleaning ${orphanedTaskEventIds.length} orphaned task events (no google_task_id) from DB`);
+                for (let i = 0; i < orphanedTaskEventIds.length; i += 50) {
+                    const batch = orphanedTaskEventIds.slice(i, i + 50);
+                    supabase.from('events').delete().in('id', batch).then(({ error: delErr }: { error: any }) => {
+                        if (delErr) console.error('[EventSlice] Orphan cleanup error:', delErr);
+                    });
+                }
+            }
+
+            // Filter out orphaned task events from in-memory set
+            const cleanedEvents = rawEvents.filter(e => {
+                if (e.google_calendar_id === 'tasks' && !e.google_task_id) return false;
+                return true;
+            });
+
+            // Auto-repair: ensure any event with google_task_id or google_calendar_id='tasks'
+            // has is_google_task = true (may have been stripped by old sanitizer)
+            for (const e of cleanedEvents) {
+                if ((e.google_task_id || e.google_calendar_id === 'tasks') && !e.is_google_task) {
+                    e.is_google_task = true;
+                    // Fire-and-forget DB repair
+                    supabase.from('events').update({ is_google_task: true }).eq('id', e.id).then(({ error: repairErr }: { error: any }) => {
+                        if (repairErr) console.error('[EventSlice] is_google_task repair error:', repairErr);
+                    });
+                }
+            }
+
+            // Dedup: keep first event per google_event_id / google_task_id
+            const seenGoogleEventIds = new Set<string>();
+            const seenGoogleTaskIds = new Set<string>();
+            const duplicateIds: string[] = [];
+            const events = cleanedEvents.filter(e => {
+                if (e.google_event_id) {
+                    if (seenGoogleEventIds.has(e.google_event_id)) {
+                        duplicateIds.push(e.id);
+                        return false;
+                    }
+                    seenGoogleEventIds.add(e.google_event_id);
+                }
+                if (e.google_task_id) {
+                    if (seenGoogleTaskIds.has(e.google_task_id)) {
+                        duplicateIds.push(e.id);
+                        return false;
+                    }
+                    seenGoogleTaskIds.add(e.google_task_id);
+                }
+                return true;
+            });
+
+            // Clean up duplicate rows from DB in background
+            if (duplicateIds.length > 0) {
+                console.warn(`[EventSlice] Cleaning ${duplicateIds.length} duplicate event rows from DB`);
+                for (let i = 0; i < duplicateIds.length; i += 50) {
+                    const batch = duplicateIds.slice(i, i + 50);
+                    supabase.from('events').delete().in('id', batch).then(({ error: delErr }: { error: any }) => {
+                        if (delErr) console.error('[EventSlice] Duplicate cleanup error:', delErr);
+                    });
+                }
+            }
+
+            // Smart merge: preserve unsynced local events AND in-flight sync events
             const local = get().calendarEvents.filter(e => e.is_unsynced);
             const serverIds = new Set(events.map(e => e.id));
             const merged = [...events];
@@ -87,8 +167,23 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 }
             }
 
+            // Also preserve Google Task events from memory if they're not yet in DB
+            // (migration may not have run yet, so DB rows won't have is_google_task)
+            const memoryGoogleTasks = get().calendarEvents.filter(
+                e => e.is_google_task && !e.is_unsynced && !serverIds.has(e.id)
+            );
+            for (const gt of memoryGoogleTasks) {
+                // Only add if not already present from server by google_task_id
+                const alreadyPresent = merged.some(
+                    m => m.google_task_id && m.google_task_id === gt.google_task_id
+                );
+                if (!alreadyPresent) {
+                    merged.push(gt);
+                }
+            }
+
             set({ calendarEvents: merged, isEventsLoading: false });
-            console.log(`[EventSlice] Loaded ${events.length} events`);
+            console.log(`[EventSlice] Loaded ${events.length} events from DB, ${merged.length} after merge (${memoryGoogleTasks.length} Google Task events preserved from memory)`);
         } catch (err) {
             console.error('[EventSlice] Load failed:', err);
             set({ isEventsLoading: false });
@@ -441,6 +536,13 @@ export const createEventSlice: StateCreator<AppState, [], [], EventSlice> = (set
                 google_calendar_id: event.google_calendar_id,
                 google_etag: event.google_etag ?? null,
                 remote_updated_at: event.remote_updated_at ?? null,
+                // Google Task fields
+                is_google_task: event.is_google_task ?? false,
+                google_task_id: event.google_task_id ?? null,
+                google_task_list_id: event.google_task_list_id ?? null,
+                is_completed: event.is_completed ?? false,
+                completed_at: event.completed_at ?? null,
+                sort_position: event.sort_position ?? null,
                 is_unsynced: event.is_unsynced ?? true,
                 created_at: event.created_at,
                 updated_at: event.updated_at,

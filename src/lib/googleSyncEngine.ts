@@ -60,6 +60,8 @@ const GOOGLE_RATE_LIMIT_MAX_MS = 30 * 60 * 1000;
 const MAX_PUSH_EVENTS_PER_CYCLE = 25;
 const MAX_PUSH_TASKS_PER_CYCLE = 50;
 const MAX_PUSH_ITEMS_PER_CYCLE = 50;
+const MAX_RETRY_COUNT = 10;
+const SHORT_RETRY_INTERVAL_MS = 30 * 1000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -308,6 +310,7 @@ class GoogleSyncEngine {
   private activeUserId: string | null = null;
   private listenersAttached = false;
   private migratedUsers = new Set<string>();
+  private reconciledUsers = new Set<string>();
   private authUnavailableUntil = 0;
   private lastAuthSkipLogAt = 0;
   private forceFullResyncOnce = false;
@@ -566,16 +569,139 @@ class GoogleSyncEngine {
       this.migratedUsers.add(userId);
     }
 
+    // Step 5: One-time reconciliation pass to fix timestamp drift
+    if (!this.reconciledUsers.has(userId)) {
+      await this.reconcileTimestampDrift(userId);
+      this.reconciledUsers.add(userId);
+    }
+
+    const phaseErrors: Array<{ phase: string; error: unknown }> = [];
+    console.log('[GoogleSyncEngine] === Sync cycle START ===');
+
     let links = await this.getAllLinks(userId);
-    await this.pushLocalEvents(userId, links);
+    console.log(`[GoogleSyncEngine] Phase: pushLocalEvents (${links.length} links)`);
+
+    try {
+      await this.pushLocalEvents(userId, links);
+    } catch (error) {
+      if (isNoGoogleAccessTokenError(error)) throw error;
+      if (this.isRateLimitAbortError(error)) throw error;
+      phaseErrors.push({ phase: 'pushLocalEvents', error });
+    }
+
     links = await this.getAllLinks(userId);
-    await this.pushLocalTasks(userId, links);
+    console.log('[GoogleSyncEngine] Phase: pushLocalTasks');
+    try {
+      await this.pushLocalTasks(userId, links);
+    } catch (error) {
+      if (isNoGoogleAccessTokenError(error)) throw error;
+      if (this.isRateLimitAbortError(error)) throw error;
+      phaseErrors.push({ phase: 'pushLocalTasks', error });
+    }
+
     links = await this.getAllLinks(userId);
-    await this.pushLocalItems(userId, links);
+    console.log('[GoogleSyncEngine] Phase: pushLocalItems');
+    try {
+      await this.pushLocalItems(userId, links);
+    } catch (error) {
+      if (isNoGoogleAccessTokenError(error)) throw error;
+      if (this.isRateLimitAbortError(error)) throw error;
+      phaseErrors.push({ phase: 'pushLocalItems', error });
+    }
+
     links = await this.getAllLinks(userId);
-    await this.pullRemoteEvents(userId, links, forceFullPull);
+    console.log('[GoogleSyncEngine] Phase: pullRemoteEvents');
+    try {
+      await this.pullRemoteEvents(userId, links, forceFullPull);
+    } catch (error) {
+      if (isNoGoogleAccessTokenError(error)) throw error;
+      if (this.isRateLimitAbortError(error)) throw error;
+      phaseErrors.push({ phase: 'pullRemoteEvents', error });
+    }
+
     links = await this.getAllLinks(userId);
-    await this.pullRemoteTasks(userId, links, forceFullTaskPull);
+    console.log('[GoogleSyncEngine] Phase: pullRemoteTasks');
+    try {
+      await this.pullRemoteTasks(userId, links, forceFullTaskPull);
+    } catch (error) {
+      if (isNoGoogleAccessTokenError(error)) throw error;
+      if (this.isRateLimitAbortError(error)) throw error;
+      phaseErrors.push({ phase: 'pullRemoteTasks', error });
+    }
+
+    const store = useAppStore.getState();
+    console.log(`[GoogleSyncEngine] === Sync cycle END === Events: ${store.calendarEvents.length}, Tasks: ${store.tasks.length}, GoogleTaskEvents: ${store.calendarEvents.filter(e => e.is_google_task).length}`);
+
+    if (phaseErrors.length > 0) {
+      console.warn(
+        `[GoogleSyncEngine] Sync cycle completed with ${phaseErrors.length} phase error(s):`,
+        phaseErrors.map((e) => `${e.phase}: ${e.error instanceof Error ? e.error.message : e.error}`)
+      );
+      // Schedule a shorter retry so the failed phases recover faster
+      this.scheduleSync('phase-error-retry', SHORT_RETRY_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * Step 5: One-time reconciliation to fix timestamp drift caused by
+   * the (now-dropped) events_updated_at trigger. Finds entities where
+   * remote_updated_at is known but updated_at has drifted, and marks
+   * them is_unsynced so the next pull/push corrects them.
+   */
+  private async reconcileTimestampDrift(userId: string) {
+    const links = await this.getAllLinks(userId);
+    const state = useAppStore.getState();
+    let driftCount = 0;
+
+    for (const link of links) {
+      if (!link.remote_updated_at) continue;
+
+      if (link.local_type === 'calendar_event') {
+        const event = state.calendarEvents.find((e) => e.id === link.local_id);
+        if (!event || event.is_unsynced) continue;
+        const localMs = safeDateMs(event.updated_at);
+        const remoteMs = safeDateMs(link.remote_updated_at);
+        if (!Number.isNaN(localMs) && !Number.isNaN(remoteMs) && Math.abs(localMs - remoteMs) > 5000) {
+          // Memory-only flag — no need to queue a DB write just to mark is_unsynced
+          useAppStore.setState((s) => ({
+            calendarEvents: s.calendarEvents.map((e) =>
+              e.id === event.id ? { ...e, is_unsynced: true } : e
+            ),
+          }));
+          driftCount++;
+        }
+      } else if (link.local_type === 'task') {
+        const task = state.tasks.find((t) => t.id === link.local_id);
+        if (!task || task.is_unsynced) continue;
+        const localMs = safeDateMs(task.updated_at);
+        const remoteMs = safeDateMs(link.remote_updated_at);
+        if (!Number.isNaN(localMs) && !Number.isNaN(remoteMs) && Math.abs(localMs - remoteMs) > 5000) {
+          useAppStore.setState((s) => ({
+            tasks: s.tasks.map((t) =>
+              t.id === task.id ? { ...t, is_unsynced: true } : t
+            ),
+          }));
+          driftCount++;
+        }
+      } else if (link.local_type === 'item') {
+        const item = state.items.find((i) => i.id === link.local_id);
+        if (!item || item.is_unsynced) continue;
+        const localMs = safeDateMs(item.updated_at);
+        const remoteMs = safeDateMs(link.remote_updated_at);
+        if (!Number.isNaN(localMs) && !Number.isNaN(remoteMs) && Math.abs(localMs - remoteMs) > 5000) {
+          useAppStore.setState((s) => ({
+            items: s.items.map((i) =>
+              i.id === item.id ? { ...i, is_unsynced: true } : i
+            ),
+          }));
+          driftCount++;
+        }
+      }
+    }
+
+    if (driftCount > 0) {
+      console.info(`[GoogleSyncEngine] Reconciled ${driftCount} timestamp-drifted entities for user ${userId}.`);
+    }
   }
 
   private async migrateLegacyEventItems(userId: string) {
@@ -680,15 +806,30 @@ class GoogleSyncEngine {
   }
 
   private async getAllLinks(userId: string): Promise<GoogleResourceLinkRow[]> {
-    const { data, error } = await supabase
-      .from('google_resource_links')
-      .select('*')
-      .eq('user_id', userId);
-    if (error) {
-      console.warn('[GoogleSyncEngine] Failed loading links:', error.message);
-      return [];
+    // Paginate to load ALL links (Supabase default limit is 1000)
+    const PAGE_SIZE = 1000;
+    let allLinks: GoogleResourceLinkRow[] = [];
+    let from = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('google_resource_links')
+        .select('*')
+        .eq('user_id', userId)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.warn('[GoogleSyncEngine] Failed loading links:', error.message);
+        return allLinks; // Return what we have so far
+      }
+
+      allLinks = allLinks.concat((data || []) as GoogleResourceLinkRow[]);
+      hasMore = (data?.length ?? 0) === PAGE_SIZE;
+      from += PAGE_SIZE;
     }
-    return (data || []) as GoogleResourceLinkRow[];
+
+    return allLinks;
   }
 
   private async getCursor(userId: string, resourceType: CursorResourceType, scopeId: string) {
@@ -789,6 +930,10 @@ class GoogleSyncEngine {
     return !Number.isNaN(nextRetryMs) && nextRetryMs > Date.now();
   }
 
+  private isPermanentlyFailed(link?: GoogleResourceLinkRow | null) {
+    return link?.error === 'max_retries_exceeded';
+  }
+
   private async clearLinkError(
     localId: string,
     resourceType: 'event' | 'task',
@@ -833,17 +978,24 @@ class GoogleSyncEngine {
       .maybeSingle();
 
     const retryCount = Math.max(0, existing?.retry_count || 0) + 1;
-    const nextRetryAt = new Date(Date.now() + this.getRetryBackoffMs(retryCount)).toISOString();
+    const maxRetriesExceeded = retryCount >= MAX_RETRY_COUNT;
+    const nextRetryAt = maxRetriesExceeded
+      ? null
+      : new Date(Date.now() + this.getRetryBackoffMs(retryCount)).toISOString();
+    const finalError = maxRetriesExceeded ? 'max_retries_exceeded' : errorText;
 
     if (existing?.id) {
       await supabase
         .from('google_resource_links')
         .update({
-          error: errorText,
+          error: finalError,
           retry_count: retryCount,
           next_retry_at: nextRetryAt,
         })
         .eq('id', existing.id);
+      if (maxRetriesExceeded) {
+        console.warn(`[GoogleSyncEngine] Max retries (${MAX_RETRY_COUNT}) exceeded for link ${existing.id}. Permanently paused.`);
+      }
       return;
     }
 
@@ -867,7 +1019,7 @@ class GoogleSyncEngine {
         last_synced_at: nowIso(),
         retry_count: retryCount,
         next_retry_at: nextRetryAt,
-        error: errorText,
+        error: finalError,
       },
       { onConflict: 'local_id,google_id' }
     );
@@ -889,6 +1041,40 @@ class GoogleSyncEngine {
   }
 
   private async createLocalEvent(event: CalendarEvent) {
+    const storeEvents = useAppStore.getState().calendarEvents;
+
+    // Dedup guard: if an event with the same google_event_id already exists, patch instead
+    if (event.google_event_id) {
+      const dup = storeEvents.find(
+        (e) => e.google_event_id === event.google_event_id
+      );
+      if (dup) {
+        await this.patchLocalEvent(dup.id, event);
+        return;
+      }
+    }
+
+    // Dedup guard: if a Google Task event with the same google_task_id already exists, patch instead
+    if (event.google_task_id) {
+      const dup = storeEvents.find(
+        (e) => e.google_task_id === event.google_task_id
+      );
+      if (dup) {
+        await this.patchLocalEvent(dup.id, event);
+        return;
+      }
+
+      // Fallback dedup: match task events by title + google_calendar_id='tasks'
+      // (catches old duplicates where google_task_id was stripped by sanitizer)
+      const titleDup = storeEvents.find(
+        (e) => e.google_calendar_id === 'tasks' && e.title === event.title && !e.google_task_id
+      );
+      if (titleDup) {
+        await this.patchLocalEvent(titleDup.id, event);
+        return;
+      }
+    }
+
     useAppStore.setState((s) => ({
       calendarEvents: [event, ...s.calendarEvents],
     }));
@@ -907,6 +1093,16 @@ class GoogleSyncEngine {
   }
 
   private async createLocalTask(task: Task) {
+    // Dedup guard: if a task with the same google_task_id already exists, patch instead
+    if (task.google_task_id) {
+      const dup = useAppStore.getState().tasks.find(
+        (t) => t.google_task_id === task.google_task_id
+      );
+      if (dup) {
+        await this.patchLocalTask(dup.id, task);
+        return;
+      }
+    }
     useAppStore.setState((s) => ({
       tasks: [task, ...s.tasks],
     }));
@@ -993,7 +1189,7 @@ class GoogleSyncEngine {
   private async pushLocalEvents(userId: string, links: GoogleResourceLinkRow[]) {
     const state = useAppStore.getState();
     const unsyncedEvents = state.calendarEvents.filter(
-      (e) => e.user_id === userId && e.is_unsynced
+      (e) => e.user_id === userId && e.is_unsynced && !e.is_google_task && e.google_calendar_id !== 'tasks'
     ).sort((a, b) => {
       const aNeedsCreate = !a.google_event_id;
       const bNeedsCreate = !b.google_event_id;
@@ -1014,7 +1210,7 @@ class GoogleSyncEngine {
         ? this.findEventLink(links, calendarId, event.google_event_id)
         : links.find((l) => l.resource_type === 'event' && l.local_id === event.id);
 
-      if (this.isRetryBlocked(linked)) {
+      if (this.isRetryBlocked(linked) || this.isPermanentlyFailed(linked)) {
         continue;
       }
 
@@ -1206,7 +1402,7 @@ class GoogleSyncEngine {
       const existingLink = links.find(
         (l) => l.resource_type === 'task' && l.local_type === 'task' && l.local_id === task.id
       );
-      if (this.isRetryBlocked(existingLink)) {
+      if (this.isRetryBlocked(existingLink) || this.isPermanentlyFailed(existingLink)) {
         continue;
       }
 
@@ -1328,6 +1524,7 @@ class GoogleSyncEngine {
         });
 
         await this.patchLocalTask(task.id, {
+          google_task_id: remote.id,
           google_etag: remote.etag || null,
           remote_updated_at: remote.updated || nowIso(),
           sort_position: remote.position || task.sort_position || null,
@@ -1444,7 +1641,7 @@ class GoogleSyncEngine {
         }
 
         const link = itemLinks.find((l) => l.resource_type === target);
-        if (this.isRetryBlocked(link)) {
+        if (this.isRetryBlocked(link) || this.isPermanentlyFailed(link)) {
           continue;
         }
 
@@ -1653,6 +1850,7 @@ class GoogleSyncEngine {
 
   private async pullRemoteEvents(userId: string, links: GoogleResourceLinkRow[], forceFullPull = false) {
     const calendars = await GoogleClient.listCalendars();
+    console.log(`[GoogleSyncEngine] pullRemoteEvents: ${calendars.length} calendar(s):`, calendars.map(c => `${c.summary || c.id} (${c.id})`));
 
     for (const calendar of calendars) {
       const cursor = forceFullPull ? null : await this.getCursor(userId, 'event', calendar.id);
@@ -1732,6 +1930,9 @@ class GoogleSyncEngine {
           : null;
 
         if (linkedItem) {
+          // Anti-resurrection: skip deleted linked items
+          if (linkedItem.deleted_at) continue;
+
           const localIsNewer = isLocalStrictlyNewer(linkedItem.updated_at, remoteUpdatedAt);
           if (remote.status === 'cancelled') {
             if (!localIsNewer) {
@@ -1885,6 +2086,9 @@ class GoogleSyncEngine {
         );
 
         if (existing) {
+          // Anti-resurrection: never overwrite a locally-deleted event
+          if (existing.deleted_at) continue;
+
           if (isRemoteStrictlyNewer(existing.updated_at, remoteUpdatedAt)) {
             const hadLocalUnsynced = !!existing.is_unsynced;
             await this.patchLocalEvent(existing.id, {
@@ -1921,7 +2125,6 @@ class GoogleSyncEngine {
               google_etag: remote.etag || null,
               remote_updated_at: remoteUpdatedAt,
               updated_at: remoteUpdatedAt,
-              deleted_at: null,
               is_unsynced: false,
             });
             if (hadLocalUnsynced) {
@@ -2076,8 +2279,11 @@ class GoogleSyncEngine {
 
   private async pullRemoteTasks(userId: string, links: GoogleResourceLinkRow[], forceFullPull = false) {
     const taskLists = await GoogleClient.listAllTaskLists();
+    console.log(`[GoogleSyncEngine] pullRemoteTasks: ${taskLists.length} task list(s)`);
 
     for (const taskList of taskLists) {
+      // We still need ensureLocalListForGoogleTaskList to maintain list mapping
+      // but Google Tasks now become CalendarEvents, not Task records
       const localListId = await this.ensureLocalListForGoogleTaskList(userId, taskList, links);
       const cursor = forceFullPull ? null : await this.getCursor(userId, 'task', taskList.id);
       const taskLinksForList = links.filter(
@@ -2085,10 +2291,11 @@ class GoogleSyncEngine {
           l.resource_type === 'task' &&
           (l.task_list_id || '@default') === taskList.id
       );
-      const localHasTasksForList = useAppStore
-        .getState()
-        .tasks.some((t) => t.user_id === userId && t.list_id === localListId && !t.deleted_at);
-      const shouldDoFullTaskListPull = forceFullPull || (!taskLinksForList.length && !localHasTasksForList);
+      const currentStore = useAppStore.getState();
+      const localHasEventsForList = currentStore.calendarEvents.some(
+        (e) => e.is_google_task && e.google_task_list_id === taskList.id && !e.deleted_at
+      );
+      const shouldDoFullTaskListPull = forceFullPull || (!taskLinksForList.length && !localHasEventsForList);
       const updatedMin = shouldDoFullTaskListPull ? undefined : cursor?.last_pulled_at || undefined;
 
       let remoteTasks: GoogleTask[];
@@ -2104,30 +2311,42 @@ class GoogleSyncEngine {
         continue;
       }
 
+      console.log(`[GoogleSyncEngine] pullRemoteTasks: List "${taskList.title}" -> ${remoteTasks.length} task(s)`);
+
       const sorted = [...remoteTasks].sort((a, b) => {
         if (!!a.parent === !!b.parent) return 0;
         return a.parent ? 1 : -1;
       });
 
       for (const remote of sorted) {
-        const currentStore = useAppStore.getState();
+        const storeNow = useAppStore.getState();
         const remoteUpdatedAt = getRemoteTaskUpdatedAt(remote);
         const existingLink = this.findTaskLink(taskLinksForList, taskList.id, remote.id);
         const linkedItem =
           existingLink?.local_type === 'item'
-            ? currentStore.items.find((i) => i.id === existingLink.local_id)
+            ? storeNow.items.find((i) => i.id === existingLink.local_id)
             : undefined;
-        const existing =
-          (existingLink && existingLink.local_type === 'task'
-            ? currentStore.tasks.find((t) => t.id === existingLink.local_id)
-            : undefined) ||
-          currentStore.tasks.find((t) => t.google_etag === remote.etag && !!remote.etag);
 
-        const parentLocalId = remote.parent
-          ? taskLinksForList.find((l) => l.local_type === 'task' && l.google_id === remote.parent)?.local_id || null
-          : null;
+        // Look up existing CalendarEvent by link or by google_task_id field
+        const existing =
+          (existingLink && (existingLink.local_type === 'calendar_event' || existingLink.local_type === 'event')
+            ? storeNow.calendarEvents.find((e) => e.id === existingLink.local_id)
+            : undefined) ||
+          storeNow.calendarEvents.find(
+            (e) => e.google_task_id === remote.id && !!remote.id
+          );
+
+        // Also check if there's an old Task record from previous sync (migration path)
+        const legacyTask =
+          (existingLink && existingLink.local_type === 'task'
+            ? storeNow.tasks.find((t) => t.id === existingLink.local_id)
+            : undefined) ||
+          storeNow.tasks.find((t) => t.google_task_id === remote.id && !!remote.id);
 
         if (linkedItem) {
+          // Anti-resurrection: skip deleted linked items
+          if (linkedItem.deleted_at) continue;
+
           const localIsNewer = isLocalStrictlyNewer(linkedItem.updated_at, remoteUpdatedAt);
           if (remote.deleted) {
             if (!localIsNewer) {
@@ -2184,39 +2403,55 @@ class GoogleSyncEngine {
           if (existing) {
             const localIsNewer = isLocalStrictlyNewer(existing.updated_at, remoteUpdatedAt);
             if (!localIsNewer) {
-              const hadLocalUnsynced = !!existing.is_unsynced;
-              await this.patchLocalTask(existing.id, {
+              await this.patchLocalEvent(existing.id, {
                 deleted_at: nowIso(),
                 google_etag: remote.etag || null,
                 remote_updated_at: remoteUpdatedAt,
                 updated_at: remoteUpdatedAt,
                 is_unsynced: false,
               });
-              if (hadLocalUnsynced) {
-                this.notifyOverwrite('Task', existing.title || remote.title || '(Untitled)');
-              }
             } else if (!existing.is_unsynced) {
-              await this.patchLocalTask(existing.id, { is_unsynced: true });
+              await this.patchLocalEvent(existing.id, { is_unsynced: true });
+            }
+          } else if (legacyTask) {
+            // Clean up legacy Task record
+            const localIsNewer = isLocalStrictlyNewer(legacyTask.updated_at, remoteUpdatedAt);
+            if (!localIsNewer) {
+              await this.patchLocalTask(legacyTask.id, {
+                deleted_at: nowIso(),
+                updated_at: remoteUpdatedAt,
+                is_unsynced: false,
+              });
             }
           }
           continue;
         }
 
         if (existing) {
+          // Anti-resurrection: never overwrite a locally-deleted event
+          if (existing.deleted_at) continue;
+
           if (isRemoteStrictlyNewer(existing.updated_at, remoteUpdatedAt)) {
             const hadLocalUnsynced = !!existing.is_unsynced;
-            await this.patchLocalTask(existing.id, {
-              list_id: localListId,
-              parent_task_id: parentLocalId,
+            const dueDate = parseGoogleDate(remote.due);
+            const startAt = dueDate || existing.start_at;
+            const endAt = dueDate ? new Date(new Date(dueDate).getTime() + 30 * 60 * 1000).toISOString() : existing.end_at;
+
+            await this.patchLocalEvent(existing.id, {
               title: remote.title || existing.title,
-              description: remote.notes || null,
-              scheduled_at: parseGoogleDate(remote.due) || null,
+              description: remote.notes || '',
+              start_at: startAt,
+              end_at: endAt,
+              is_all_day: !!dueDate,
+              is_google_task: true,
+              google_task_id: remote.id,
+              google_task_list_id: taskList.id,
               is_completed: remote.status === 'completed',
+              completed_at: remote.status === 'completed' ? (remote.completed || remoteUpdatedAt) : null,
               sort_position: remote.position || null,
               google_etag: remote.etag || null,
               remote_updated_at: remoteUpdatedAt,
               updated_at: remoteUpdatedAt,
-              deleted_at: null,
               is_unsynced: false,
             });
             if (hadLocalUnsynced) {
@@ -2226,11 +2461,10 @@ class GoogleSyncEngine {
             const localIsNewer = isLocalStrictlyNewer(existing.updated_at, remoteUpdatedAt);
             if (localIsNewer) {
               if (!existing.is_unsynced) {
-                await this.patchLocalTask(existing.id, { is_unsynced: true });
+                await this.patchLocalEvent(existing.id, { is_unsynced: true });
               }
             } else if (existing.is_unsynced) {
-              // Heal stale unsynced flags from older sync runs to stop endless re-push loops.
-              await this.patchLocalTask(existing.id, {
+              await this.patchLocalEvent(existing.id, {
                 is_unsynced: false,
                 remote_updated_at: remoteUpdatedAt,
                 google_etag: remote.etag || existing.google_etag || null,
@@ -2238,34 +2472,57 @@ class GoogleSyncEngine {
             }
           }
         } else {
-          const newTask: Task = {
-            id: generateId(),
+          // Create a NEW CalendarEvent for this Google Task
+          const dueDate = parseGoogleDate(remote.due);
+          const startAt = dueDate || nowIso();
+          const endAt = dueDate
+            ? new Date(new Date(dueDate).getTime() + 30 * 60 * 1000).toISOString()
+            : new Date(new Date(startAt).getTime() + 30 * 60 * 1000).toISOString();
+
+          const eventId = generateId();
+          const newEvent: CalendarEvent = {
+            id: eventId,
             user_id: userId,
-            list_id: localListId,
-            parent_task_id: parentLocalId,
-            sort_position: remote.position || null,
             title: remote.title || '(No title)',
-            description: remote.notes || null,
-            color: '#10B981',
-            priority: 'none',
-            scheduled_at: parseGoogleDate(remote.due) || null,
-            remind_before: null,
-            recurring_config: null,
-            item_ids: [],
-            item_completion: {},
-            is_completed: remote.status === 'completed',
+            description: remote.notes || '',
+            start_at: startAt,
+            end_at: endAt,
+            is_all_day: !!dueDate, // Tasks with due date are shown as all-day
+            rrule: null,
+            parent_event_id: null,
+            recurring_event_id: null,
+            is_deleted_instance: false,
+            location: '',
+            color_id: '7',
+            visibility: 'default',
+            transparency: 'transparent',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            attendees: [],
+            conference_data: null,
+            reminders: [],
+            attachments: [],
+            google_event_id: null, // This is a task, not a calendar event
+            google_calendar_id: 'tasks', // Marker for task-sourced events
             google_etag: remote.etag || null,
             remote_updated_at: remoteUpdatedAt,
-            is_unsynced: false,
+            // Google Task specific fields
+            is_google_task: true,
+            google_task_id: remote.id,
+            google_task_list_id: taskList.id,
+            is_completed: remote.status === 'completed',
+            completed_at: remote.status === 'completed' ? (remote.completed || remoteUpdatedAt) : null,
+            sort_position: remote.position || null,
             created_at: remoteUpdatedAt,
             updated_at: remoteUpdatedAt,
             deleted_at: null,
+            is_unsynced: false,
           };
-          await this.createLocalTask(newTask);
+
+          await this.createLocalEvent(newEvent);
           await this.upsertLink({
             user_id: userId,
-            local_id: newTask.id,
-            local_type: 'task',
+            local_id: eventId,
+            local_type: 'calendar_event',
             google_id: remote.id,
             resource_type: 'task',
             task_list_id: taskList.id,
@@ -2276,8 +2533,8 @@ class GoogleSyncEngine {
           taskLinksForList.push({
             id: generateId(),
             user_id: userId,
-            local_id: newTask.id,
-            local_type: 'task',
+            local_id: eventId,
+            local_type: 'calendar_event',
             google_id: remote.id,
             resource_type: 'task',
             calendar_id: null,
@@ -2288,6 +2545,14 @@ class GoogleSyncEngine {
             next_retry_at: null,
             error: null,
           });
+
+          // If there's a legacy Task record from previous sync, soft-delete it
+          if (legacyTask && !legacyTask.deleted_at) {
+            await this.patchLocalTask(legacyTask.id, {
+              deleted_at: nowIso(),
+              is_unsynced: false,
+            });
+          }
         }
       }
 
