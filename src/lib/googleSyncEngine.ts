@@ -2683,3 +2683,58 @@ class GoogleSyncEngine {
 }
 
 export const googleSyncEngine = new GoogleSyncEngine();
+
+/**
+ * EMERGENCY: Bulk-delete duplicate Google Tasks by title.
+ * Run from browser console: window.__nukeGoogleTasks('Google cloud trial end')
+ */
+async function nukeGoogleTasksByTitle(titleMatch: string) {
+  console.warn(`[NUKE] Starting bulk delete of Google Tasks matching "${titleMatch}"...`);
+  const lists = await GoogleClient.listAllTaskLists();
+  let totalDeleted = 0;
+  let totalKept = 0;
+
+  for (const list of lists) {
+    let tasks: GoogleTask[];
+    try {
+      tasks = await GoogleClient.listAllTasks(list.id);
+    } catch (e) {
+      console.warn(`[NUKE] Failed to list tasks for "${list.title}":`, e);
+      continue;
+    }
+
+    const matching = tasks.filter(
+      (t) => !t.deleted && t.title?.toLowerCase().includes(titleMatch.toLowerCase())
+    );
+
+    if (!matching.length) continue;
+
+    // Keep the FIRST one (oldest), delete the rest
+    const [kept, ...dupes] = matching;
+    totalKept++;
+    console.log(`[NUKE] List "${list.title}": keeping 1, deleting ${dupes.length} duplicates of "${kept.title}"`);
+
+    for (const dupe of dupes) {
+      try {
+        await GoogleClient.deleteTask(list.id, dupe.id);
+        totalDeleted++;
+        if (totalDeleted % 25 === 0) {
+          console.log(`[NUKE] Progress: ${totalDeleted} deleted so far...`);
+          // Brief pause every 25 to avoid rate limits
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      } catch (e) {
+        console.warn(`[NUKE] Failed to delete task ${dupe.id}:`, e);
+      }
+    }
+  }
+
+  console.warn(`[NUKE] DONE. Deleted ${totalDeleted} duplicate tasks (kept ${totalKept}).`);
+  return { totalDeleted, totalKept };
+}
+
+// Expose on window for emergency console use
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__nukeGoogleTasks = nukeGoogleTasksByTitle;
+  (window as unknown as Record<string, unknown>).__googleSyncEngine = googleSyncEngine;
+}
