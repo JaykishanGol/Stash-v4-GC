@@ -182,6 +182,15 @@ export class GoogleClient {
         }
     }
 
+    /**
+     * Public accessor to check if a valid Google token is available.
+     * Returns true if a token was obtained, false otherwise.
+     */
+    static async ensureAccessToken(): Promise<boolean> {
+        const token = await this.getAccessToken();
+        return !!token;
+    }
+
     private static async request<T>(endpoint: string, method: string = 'GET', body?: unknown): Promise<T> {
         const token = await this.getAccessToken();
         if (!token) {

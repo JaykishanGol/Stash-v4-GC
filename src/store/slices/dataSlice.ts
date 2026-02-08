@@ -20,12 +20,7 @@ import {
     createDeleteItemsAction, 
     createMoveItemsAction,
 } from '../../lib/undoStack';
-
-function requestGoogleItemSync() {
-    void import('../../lib/googleSyncEngine').then(({ googleSyncEngine }) => {
-        googleSyncEngine.scheduleSync('item-change', 500);
-    });
-}
+import { scheduleSync } from '../../lib/sync';
 
 // Debounce helper for expensive store computations
 function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -311,7 +306,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         get().calculateStats();
         get().refreshFolderCounts();
         get().syncItemToDb(itemWithFlag);
-        requestGoogleItemSync();
+        scheduleSync();
     },
 
     updateItem: (id, updates) => {
@@ -326,7 +321,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         const updatedItem = get().items.find(i => i.id === id);
         if (updatedItem) {
             get().syncItemToDb(updatedItem);
-            requestGoogleItemSync();
+            scheduleSync();
         }
     },
 
@@ -436,7 +431,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             'Undo',
             () => get().undo()
         );
-        requestGoogleItemSync();
+        scheduleSync();
     },
 
     restoreItem: (id) => {
@@ -486,7 +481,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
 
         get().calculateStats();
         get().refreshFolderCounts();
-        requestGoogleItemSync();
+        scheduleSync();
     },
 
     permanentlyDeleteItem: async (id) => {
@@ -546,7 +541,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         idsToDelete.forEach(targetId => {
             get().deleteItemFromDb(targetId);
         });
-        requestGoogleItemSync();
+        scheduleSync();
     },
 
     emptyTrash: async () => {
@@ -586,7 +581,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             trashedItems.forEach(item => {
                 get().deleteItemFromDb(item.id);
             });
-            requestGoogleItemSync();
+            scheduleSync();
             return;
         }
 
@@ -622,7 +617,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
             const state = get();
             state.addNotification?.('warning', 'Trash emptying slowly', 'Using fallback method due to network error.');
         }
-        requestGoogleItemSync();
+        scheduleSync();
     },
 
     toggleItemComplete: (id) => {
@@ -701,7 +696,7 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set, 
         });
 
         get().refreshFolderCounts();
-        requestGoogleItemSync();
+        scheduleSync();
 
         // Notify
         get().addNotification(

@@ -109,24 +109,6 @@ export function TasksPanel() {
                     originalEvent: e,
                 };
             }),
-        // Legacy Task records synced from Google (have google_task_id set)
-        // Only include if NOT already represented as a CalendarEvent above
-        ...tasks
-            .filter(t => !t.deleted_at && t.google_task_id && !seenTaskTitles.has(t.title))
-            .map(t => {
-                seenTaskTitles.add(t.title);
-                return {
-                    id: t.id,
-                    title: t.title,
-                    due_at: t.scheduled_at,
-                    is_completed: t.is_completed,
-                    list_id: t.list_id,
-                    sort_position: t.sort_position,
-                    completed_at: t.completed_at ?? null,
-                    type: 'google-task' as const,
-                    originalEvent: undefined,
-                };
-            }),
         // Items synced as Google Tasks (from prior sync cycles)
         // Only include if NOT already represented above
         ...items
@@ -145,9 +127,9 @@ export function TasksPanel() {
                     originalEvent: undefined,
                 };
             }),
-        // Local app Tasks (our checklist entity — ones WITHOUT google_task_id)
+        // Local app Tasks (our checklist entity)
         ...tasks
-            .filter(t => !t.deleted_at && !t.google_task_id && (listFilter === null || t.list_id === listFilter))
+            .filter(t => !t.deleted_at && (listFilter === null || t.list_id === listFilter))
             .map(t => ({
                 id: t.id,
                 title: t.title,

@@ -38,6 +38,9 @@ interface EventRow {
     is_completed?: boolean;
     completed_at?: string | null;
     sort_position?: string | null;
+    // Source entity
+    source_entity_type?: string | null;
+    source_entity_id?: string | null;
     // Metadata
     created_at: string | null;
     updated_at: string | null;
@@ -95,6 +98,9 @@ export function adaptEventRow(row: EventRow): CalendarEvent {
         is_completed: row.is_completed ?? false,
         completed_at: row.completed_at ?? null,
         sort_position: row.sort_position ?? null,
+        // Source entity
+        source_entity_type: (row.source_entity_type as CalendarEvent['source_entity_type']) ?? null,
+        source_entity_id: row.source_entity_id ?? null,
         // Metadata
         created_at: row.created_at || new Date().toISOString(),
         updated_at: row.updated_at || new Date().toISOString(),

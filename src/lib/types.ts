@@ -213,6 +213,10 @@ export interface CalendarEvent {
   completed_at?: string | null;
   sort_position?: string | null;
 
+  // Source entity link (when an Item or Task is scheduled as a Google Event/Task)
+  source_entity_type?: 'item' | 'task' | null;
+  source_entity_id?: string | null;
+
   // Metadata
   created_at: string;
   updated_at: string;
@@ -259,9 +263,6 @@ export interface Task {
   item_completion: Record<string, boolean>;
   is_completed: boolean;
   completed_at?: string | null;
-  google_task_id?: string | null;
-  google_etag?: string | null;
-  remote_updated_at?: string | null;
   is_unsynced?: boolean;
   created_at: string;
   updated_at: string;

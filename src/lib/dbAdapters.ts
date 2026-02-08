@@ -108,9 +108,6 @@ export function adaptTaskRow(row: TaskRow): Task {
         item_completion: (row.item_completion as Record<string, boolean>) ?? {},
         is_completed: row.is_completed ?? false,
         completed_at: (row as TaskRow & { completed_at?: string | null }).completed_at ?? null,
-        google_task_id: (row as TaskRow & { google_task_id?: string | null }).google_task_id ?? null,
-        google_etag: (row as TaskRow & { google_etag?: string | null }).google_etag ?? null,
-        remote_updated_at: (row as TaskRow & { remote_updated_at?: string | null }).remote_updated_at ?? null,
         is_unsynced: (row as TaskRow & { is_unsynced?: boolean }).is_unsynced ?? false,
         created_at: row.created_at ?? new Date().toISOString(),
         updated_at: row.updated_at ?? new Date().toISOString(),
@@ -155,6 +152,9 @@ export function adaptEventRow(row: any): CalendarEvent {
         is_completed: row.is_completed ?? false,
         completed_at: row.completed_at ?? null,
         sort_position: row.sort_position ?? null,
+        // Source entity
+        source_entity_type: row.source_entity_type ?? null,
+        source_entity_id: row.source_entity_id ?? null,
         // Metadata
         created_at: row.created_at ?? new Date().toISOString(),
         updated_at: row.updated_at ?? new Date().toISOString(),

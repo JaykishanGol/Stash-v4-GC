@@ -339,13 +339,13 @@ class PersistentQueue {
                 ALLOWED_KEYS = ['id', 'user_id', 'name', 'color', 'order', 'items', 'created_at', 'item_count'];
             } else if (type === 'upsert-task') {
                 // Task fields (simplified scheduler)
-                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'parent_task_id', 'sort_position', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'item_ids', 'item_completion', 'is_completed', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at', 'tags'];
+                ALLOWED_KEYS = ['id', 'user_id', 'list_id', 'parent_task_id', 'sort_position', 'title', 'description', 'color', 'priority', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'item_ids', 'item_completion', 'is_completed', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at', 'tags'];
             } else if (type === 'upsert-item') {
                 // Item fields (simplified scheduler)
                 ALLOWED_KEYS = ['id', 'user_id', 'folder_id', 'type', 'title', 'content', 'file_meta', 'priority', 'tags', 'scheduled_at', 'recurring_config', 'remind_at', 'remind_before', 'bg_color', 'position_x', 'position_y', 'width', 'height', 'is_pinned', 'is_archived', 'is_completed', 'created_at', 'updated_at', 'deleted_at', 'child_count'];
             } else if (type === 'upsert-event') {
                 // CalendarEvent fields (including Google Task fields)
-                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'attachments', 'google_event_id', 'google_calendar_id', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at', 'is_google_task', 'google_task_id', 'google_task_list_id', 'is_completed', 'completed_at', 'sort_position'];
+                ALLOWED_KEYS = ['id', 'user_id', 'title', 'description', 'start_at', 'end_at', 'is_all_day', 'rrule', 'parent_event_id', 'recurring_event_id', 'is_deleted_instance', 'location', 'color_id', 'visibility', 'transparency', 'timezone', 'attendees', 'conference_data', 'reminders', 'attachments', 'google_event_id', 'google_calendar_id', 'google_etag', 'remote_updated_at', 'is_unsynced', 'created_at', 'updated_at', 'deleted_at', 'is_google_task', 'google_task_id', 'google_task_list_id', 'is_completed', 'completed_at', 'sort_position', 'source_entity_type', 'source_entity_id'];
             }
 
             // Filter entries

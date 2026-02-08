@@ -8,12 +8,7 @@ import type { StateCreator } from 'zustand';
 import type { AppState } from '../types';
 import type { Task } from '../../lib/types';
 import { persistentSyncQueue } from '../../lib/persistentQueue';
-
-function requestGoogleTaskSync() {
-    void import('../../lib/googleSyncEngine').then(({ googleSyncEngine }) => {
-        googleSyncEngine.scheduleSync('task-change', 500);
-    });
-}
+import { scheduleSync } from '../../lib/sync';
 
 export interface TaskSlice {
     // Task State (owned by DataSlice, referenced here for actions)
@@ -47,8 +42,6 @@ export const createTaskSlice: StateCreator<AppState, [], [], TaskSlice> = (set, 
             list_id: taskData.list_id || null,
             parent_task_id: taskData.parent_task_id || null,
             sort_position: taskData.sort_position || null,
-            google_etag: null,
-            remote_updated_at: null,
             is_unsynced: true,
             // CRITICAL: Initialize arrays to prevent drag-drop failures
             ...taskData,
@@ -58,7 +51,7 @@ export const createTaskSlice: StateCreator<AppState, [], [], TaskSlice> = (set, 
         set(state => ({ tasks: [newTask, ...state.tasks] }));
         get().syncTaskToDb(newTask);
         get().calculateStats();
-        requestGoogleTaskSync();
+        scheduleSync();
     },
 
     updateTask: (id, updates) => {
@@ -71,7 +64,7 @@ export const createTaskSlice: StateCreator<AppState, [], [], TaskSlice> = (set, 
             get().syncTaskToDb(task);
         }
         get().calculateStats();
-        requestGoogleTaskSync();
+        scheduleSync();
     },
 
     deleteTask: (id) => {
@@ -88,7 +81,7 @@ export const createTaskSlice: StateCreator<AppState, [], [], TaskSlice> = (set, 
             get().syncTaskToDb(task);
         }
         get().calculateStats();
-        requestGoogleTaskSync();
+        scheduleSync();
     },
 
     completeTask: (id) => {

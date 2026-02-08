@@ -19,7 +19,7 @@ import { useAppStore } from './store/useAppStore';
 import { useMobileBackHandler } from './hooks/useMobileBackHandler';
 import { useRealtimeSubscription } from './hooks/useRealtime';
 import { persistentSyncQueue } from './lib/persistentQueue';
-import { googleSyncEngine } from './lib/googleSyncEngine';
+import { startSync, stopSync } from './lib/sync';
 import { getPendingShares, processShare, clearPendingShares, type ShareItem } from './lib/shareHandler';
 import { isSupabaseConfigured } from './lib/supabase';
 import './index.css';
@@ -70,10 +70,9 @@ function App() {
   // Start/stop unified Google two-way sync engine with auth lifecycle.
   useEffect(() => {
     if (userId && userId !== 'demo') {
-      googleSyncEngine.start(userId);
-      googleSyncEngine.scheduleSync('auth-change', 300);
+      startSync();
     } else {
-      googleSyncEngine.stop();
+      stopSync();
     }
   }, [userId]);
 
