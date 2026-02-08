@@ -644,89 +644,18 @@ class GoogleSyncEngine {
   }
 
   /**
-   * Step 5: One-time reconciliation to fix timestamp drift caused by
-   * the (now-dropped) events_updated_at trigger. Finds entities where
-   * remote_updated_at is known but updated_at has drifted, and marks
-   * them is_unsynced so the next pull/push corrects them.
-   *
-   * IMPORTANT: This runs at most ONCE per device (persisted via
-   * localStorage) and caps at MAX_RECONCILE_PER_CYCLE entities to
-   * prevent sync storms that create duplicate Google resources.
+   * PERMANENTLY DISABLED — was the root cause of catastrophic
+   * duplication storms (mass-marking entities is_unsynced every session).
    */
   private static readonly RECONCILE_STORAGE_KEY = 'stash_reconcile_done_v2';
-  private static readonly MAX_RECONCILE_PER_CYCLE = 10;
 
-  private async reconcileTimestampDrift(userId: string) {
-    // Only run this once EVER per device (persisted). It was a one-time
-    // migration helper and mass-marking entities is_unsynced caused
-    // catastrophic duplicate creation on Google Calendar/Tasks.
-    try {
-      const done = localStorage.getItem(GoogleSyncEngine.RECONCILE_STORAGE_KEY);
-      if (done) {
-        console.info('[GoogleSyncEngine] Timestamp drift reconciliation already completed, skipping.');
-        return;
-      }
-    } catch { /* localStorage unavailable, proceed */ }
-
-    const links = await this.getAllLinks(userId);
-    const state = useAppStore.getState();
-    let driftCount = 0;
-
-    for (const link of links) {
-      if (driftCount >= GoogleSyncEngine.MAX_RECONCILE_PER_CYCLE) break;
-      if (!link.remote_updated_at) continue;
-
-      if (link.local_type === 'calendar_event') {
-        const event = state.calendarEvents.find((e) => e.id === link.local_id);
-        if (!event || event.is_unsynced) continue;
-        const localMs = safeDateMs(event.updated_at);
-        const remoteMs = safeDateMs(link.remote_updated_at);
-        if (!Number.isNaN(localMs) && !Number.isNaN(remoteMs) && Math.abs(localMs - remoteMs) > 5000) {
-          // Memory-only flag — no need to queue a DB write just to mark is_unsynced
-          useAppStore.setState((s) => ({
-            calendarEvents: s.calendarEvents.map((e) =>
-              e.id === event.id ? { ...e, is_unsynced: true } : e
-            ),
-          }));
-          driftCount++;
-        }
-      } else if (link.local_type === 'task') {
-        const task = state.tasks.find((t) => t.id === link.local_id);
-        if (!task || task.is_unsynced) continue;
-        const localMs = safeDateMs(task.updated_at);
-        const remoteMs = safeDateMs(link.remote_updated_at);
-        if (!Number.isNaN(localMs) && !Number.isNaN(remoteMs) && Math.abs(localMs - remoteMs) > 5000) {
-          useAppStore.setState((s) => ({
-            tasks: s.tasks.map((t) =>
-              t.id === task.id ? { ...t, is_unsynced: true } : t
-            ),
-          }));
-          driftCount++;
-        }
-      } else if (link.local_type === 'item') {
-        const item = state.items.find((i) => i.id === link.local_id);
-        if (!item || item.is_unsynced) continue;
-        const localMs = safeDateMs(item.updated_at);
-        const remoteMs = safeDateMs(link.remote_updated_at);
-        if (!Number.isNaN(localMs) && !Number.isNaN(remoteMs) && Math.abs(localMs - remoteMs) > 5000) {
-          useAppStore.setState((s) => ({
-            items: s.items.map((i) =>
-              i.id === item.id ? { ...i, is_unsynced: true } : i
-            ),
-          }));
-          driftCount++;
-        }
-      }
-    }
-
-    if (driftCount > 0) {
-      console.info(`[GoogleSyncEngine] Reconciled ${driftCount} timestamp-drifted entities for user ${userId} (capped at ${GoogleSyncEngine.MAX_RECONCILE_PER_CYCLE}).`);
-    }
-
-    // Mark as done globally so this never runs again
-    try {
-      localStorage.setItem(GoogleSyncEngine.RECONCILE_STORAGE_KEY, Date.now().toString());
-    } catch { /* localStorage unavailable */ }
+  private async reconcileTimestampDrift(_userId: string) {
+    // PERMANENTLY DISABLED — this function was the root cause of
+    // catastrophic duplication storms. It mass-marked entities as
+    // is_unsynced which made the push phase recreate them on Google
+    // every single session. Never re-enable.
+    console.info('[GoogleSyncEngine] reconcileTimestampDrift permanently disabled.');
+    try { localStorage.setItem(GoogleSyncEngine.RECONCILE_STORAGE_KEY, Date.now().toString()); } catch { /* */ }
   }
 
   private async migrateLegacyEventItems(userId: string) {
@@ -953,7 +882,24 @@ class GoogleSyncEngine {
       .upsert(payload, { onConflict: 'local_id,google_id' });
 
     if (error) {
-      console.warn('[GoogleSyncEngine] Failed upserting link:', error.message);
+      // If we STILL get a 409, do a hard DELETE of ALL rows for this
+      // (local_id, resource_type) and then a plain INSERT.
+      if (error.code === '23505') {
+        console.warn('[GoogleSyncEngine] upsertLink 409 — falling back to DELETE+INSERT for', input.local_id);
+        await supabase
+          .from('google_resource_links')
+          .delete()
+          .eq('local_id', input.local_id)
+          .eq('resource_type', input.resource_type);
+        const { error: insertError } = await supabase
+          .from('google_resource_links')
+          .insert(payload);
+        if (insertError) {
+          console.error('[GoogleSyncEngine] upsertLink INSERT fallback also failed:', insertError.message);
+        }
+      } else {
+        console.warn('[GoogleSyncEngine] Failed upserting link:', error.message);
+      }
     }
   }
 

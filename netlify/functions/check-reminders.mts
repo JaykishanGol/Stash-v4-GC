@@ -51,11 +51,37 @@ export default async (req, context) => {
             });
         }
 
+        // ── Anti-spam: cap + deduplicate ──────────────────────
+        const MAX_NOTIFICATIONS_PER_USER = 10;
+
         // Group by user_id
         const byUser: Record<string, any[]> = {};
         for (const item of (allDue || [])) {
             if (!byUser[item.user_id]) byUser[item.user_id] = [];
             byUser[item.user_id].push(item);
+        }
+
+        // Deduplicate by title per user (keep the newest) and cap
+        for (const userId of Object.keys(byUser)) {
+            const seenTitles = new Set<string>();
+            const deduped: any[] = [];
+            // Sort newest first so we keep the freshest per title
+            byUser[userId].sort((a: any, b: any) =>
+                new Date(b.scheduled_at || 0).getTime() - new Date(a.scheduled_at || 0).getTime()
+            );
+            for (const item of byUser[userId]) {
+                const key = (item.title || '').toLowerCase().trim();
+                if (seenTitles.has(key)) {
+                    // Still acknowledge duplicates so they don't re-fire next minute
+                    const table = item.type === 'task' ? 'tasks' : 'items';
+                    await supabase.from(table).update({ last_acknowledged_at: now }).eq('id', item.id);
+                    continue;
+                }
+                seenTitles.add(key);
+                deduped.push(item);
+            }
+            byUser[userId] = deduped.slice(0, MAX_NOTIFICATIONS_PER_USER);
+            console.log(`[check-reminders] User ${userId}: ${allDue?.length || 0} due → ${byUser[userId].length} after dedup+cap`);
         }
 
         // BATCH: Fetch all push subscriptions for all affected users in ONE query
